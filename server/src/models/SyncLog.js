@@ -27,6 +27,9 @@ const sourceSchema = new mongoose.Schema(
     unchanged: { type: Number, default: 0 },
     deleted: { type: Number, default: 0 },
     durationMs: { type: Number, default: 0 },
+    // The file was not downloaded at all: Drive reported the same modifiedTime the stored data
+    // was parsed from (models/SyncState.js).
+    skipped: { type: Boolean, default: false },
     ok: { type: Boolean, default: true },
   },
   { _id: false },

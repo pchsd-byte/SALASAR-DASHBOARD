@@ -12,7 +12,12 @@ import { SynopsisMonth } from '../models/SynopsisMonth.js';
 import { SynopsisDispatchRecord } from '../models/SynopsisDispatchRecord.js';
 import { SyncLog } from '../models/SyncLog.js';
 import { SyncLock } from '../models/SyncLock.js';
+import { SyncState } from '../models/SyncState.js';
+import { invalidateCache } from './payloadCache.js';
 import { env } from '../config/env.js';
+
+const LIVE_WORKBOOK_KEY = 'live-workbook';
+const synopsisKey = (fileId) => `synopsis:${fileId}`;
 
 const PROGRESS_TABS = [
   { title: 'Adani Progress', client: 'Adani' },
@@ -451,10 +456,26 @@ async function syncSynopsisFolder(log, sources) {
   // Every workbook is read before anything is written, so the month each one reports on is
   // known up front. One bad workbook must not cost the others their sync, so each is caught on
   // its own.
+  // A month whose workbook has not changed in Drive since it was last read is left alone: its
+  // figures are already stored, and re-downloading a dozen ~100 KB workbooks every run is what
+  // the daily schedule and this check exist to stop. The stored month must still be present —
+  // otherwise "unchanged" would keep a month out of the database forever.
+  const known = new Map(
+    (await SyncState.find({ key: { $in: files.map((f) => synopsisKey(f.id)) } }).lean()).map((s) => [s.key, s]),
+  );
+  const storedMonths = new Set((await SynopsisMonth.find().select('month').lean()).map((m) => m.month));
+  const unchangedMonths = new Set();
+
   const parsedFiles = [];
   let everyFileRead = true;
   for (const file of files) {
     const tab = `Synopsis/${file.name}`;
+    const seen = known.get(synopsisKey(file.id));
+    if (seen?.month && storedMonths.has(seen.month) && seen.modifiedTime && file.modifiedTime
+        && new Date(seen.modifiedTime).getTime() === new Date(file.modifiedTime).getTime()) {
+      unchangedMonths.add(seen.month);
+      continue;
+    }
     try {
       const parsed = parseSynopsisSheet(await sources.getWorkbookRows(file.id, file.mimeType), file.name);
       parsed.warnings.forEach((w) => note(log, tab, w, 'warning'));
@@ -489,10 +510,23 @@ async function syncSynopsisFolder(log, sources) {
   let written = 0;
   for (const { file, parsed } of byMonth.values()) {
     try {
-      if (await writeSynopsisMonth(file, parsed, log)) written += 1;
+      if (await writeSynopsisMonth(file, parsed, log)) {
+        written += 1;
+        // Remember which version of this workbook produced the stored month, so the next run
+        // can skip downloading it until somebody edits it again.
+        await SyncState.updateOne(
+          { key: synopsisKey(file.id) },
+          { $set: { fileId: file.id, modifiedTime: file.modifiedTime ?? null, month: parsed.month, syncedAt: new Date() } },
+          { upsert: true },
+        );
+      }
     } catch (err) {
       note(log, `Synopsis/${file.name}`, err.message, 'error');
     }
+  }
+
+  if (unchangedMonths.size > 0) {
+    note(log, 'Synopsis', `${unchangedMonths.size} monthly workbook(s) unchanged in Drive since the last sync (${[...unchangedMonths].sort().join(', ')}) — not downloaded.`, 'info');
   }
 
   // A month whose workbook has left the folder used to stay on the dashboard forever. It is
@@ -500,7 +534,10 @@ async function syncSynopsisFolder(log, sources) {
   // in which any file failed, because a month missing from a failed run is not gone.
   let removedMonths = 0;
   if (everyFileRead) {
-    const orphans = await SynopsisMonth.find({ month: { $nin: [...byMonth.keys()] } }).select('month sourceFile').lean();
+    // A month whose workbook was skipped as unchanged is still covered by the folder — leaving
+    // it out here would delete the very data the skip was meant to preserve.
+    const covered = [...byMonth.keys(), ...unchangedMonths];
+    const orphans = await SynopsisMonth.find({ month: { $nin: covered } }).select('month sourceFile').lean();
     if (orphans.length > 0) {
       const months = orphans.map((o) => o.month);
       await SynopsisDispatchRecord.deleteMany({ month: { $in: months } });
@@ -510,7 +547,17 @@ async function syncSynopsisFolder(log, sources) {
     }
   }
 
-  log.sources.push({ name: 'Synopsis', parsed: parsedFiles.length, inserted: written, deleted: removedMonths, durationMs: Date.now() - started, ok: written > 0 });
+  log.sources.push({
+    name: 'Synopsis',
+    parsed: parsedFiles.length,
+    inserted: written,
+    unchanged: unchangedMonths.size,
+    deleted: removedMonths,
+    durationMs: Date.now() - started,
+    // A run in which every workbook was unchanged did its job: nothing to download, nothing to
+    // write. Before this it would have reported the whole step as failed.
+    ok: written > 0 || unchangedMonths.size > 0,
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -556,16 +603,34 @@ export async function runSync(trigger = 'manual', sources = driveSources) {
     // Each source is isolated: one failing costs only itself. The Manpower step used to have
     // no guard, so its failure skipped production, dispatch and the separate synopsis folder.
     let workbook = null;
+    const knownLive = await SyncState.findOne({ key: LIVE_WORKBOOK_KEY }).lean();
     try {
-      workbook = await sources.openLiveWorkbook();
+      workbook = await sources.openLiveWorkbook({ knownModifiedTime: knownLive?.modifiedTime ?? null });
     } catch (err) {
       note(log, 'Live workbook', `Could not download the live workbook: ${err.message}`, 'error');
     }
-    if (workbook) {
+    if (workbook?.unchanged) {
+      // Drive says the file has not been touched since the version already in the database, so
+      // there is nothing to download and nothing to re-parse. Recorded so the run still says
+      // what it did rather than looking like it skipped the sheet for an unknown reason.
+      note(log, 'Live workbook', `Unchanged in Drive since the last sync (${workbook.modifiedTime?.toISOString() ?? 'unknown'}) — not downloaded.`, 'info');
+      log.sources.push({ name: 'Live workbook', fileId: workbook.fileId, modifiedTime: workbook.modifiedTime, skipped: true, durationMs: 0, ok: true });
+    } else if (workbook) {
+      const errorsBefore = log.issues.filter((i) => i.severity === 'error').length;
       await step(log, 'Manpower', () => syncManpowerTab(workbook, log));
       await step(log, 'Production', () => syncProductionTabs(workbook, log));
       for (const tab of DISPATCH_TABS) {
         await step(log, tab, () => syncDispatchTab(workbook, tab, log));
+      }
+      // Only a clean pass records the version. After a failure the next run downloads the
+      // workbook again instead of treating a half-written parse as up to date.
+      const cleanPass = log.issues.filter((i) => i.severity === 'error').length === errorsBefore;
+      if (cleanPass && workbook.modifiedTime) {
+        await SyncState.updateOne(
+          { key: LIVE_WORKBOOK_KEY },
+          { $set: { fileId: workbook.fileId, modifiedTime: workbook.modifiedTime, syncedAt: new Date() } },
+          { upsert: true },
+        );
       }
     }
     await step(log, 'Synopsis', () => syncSynopsisFolder(log, sources));
@@ -578,6 +643,9 @@ export async function runSync(trigger = 'manual', sources = driveSources) {
     note(log, 'sync', err.message, 'error');
   } finally {
     log.finishedAt = new Date();
+    // Anything written makes every cached dashboard payload out of date. Cleared here rather
+    // than per collection: the pages all derive from the same records.
+    if (log.rowsUpserted > 0) invalidateCache();
     try {
       await log.save();
     } finally {

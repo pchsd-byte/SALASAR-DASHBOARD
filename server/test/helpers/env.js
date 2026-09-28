@@ -16,5 +16,10 @@ process.env.EMAIL_USER = 'pc.hsd@salasartechno.com';
 process.env.ALLOWED_LOGIN_DOMAINS = 'salasartechno.com';
 process.env.ALLOWED_LOGIN_EMAILS = 'guest@gmail.com';
 process.env.CLIENT_ORIGIN = 'http://localhost:5173/';
+// Pinned for the same reason as MONGODB_URI above: whoever runs the tests may have a deployed
+// server's URLs in their own server/.env, and dotenv would fill these in from it.
+process.env.GOOGLE_LOGIN_REDIRECT_URI = 'http://localhost:5001/api/auth/google/callback';
+process.env.GOOGLE_DRIVE_REDIRECT_URI = 'http://localhost:5001/api/auth/google/connect-drive/callback';
+process.env.GMAIL_SEND_REDIRECT_URI = 'http://localhost:5001/api/auth/google/connect-gmail/callback';
 process.env.SYNOPSIS_FOLDER_ID = 'test-synopsis-folder';
 process.env.GEMINI_API_KEY = '';

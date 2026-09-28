@@ -1,5 +1,6 @@
 import './helpers/env.js';
 import { test, describe, before, after, beforeEach } from 'node:test';
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
@@ -13,6 +14,8 @@ import { SynopsisDispatchRecord } from '../src/models/SynopsisDispatchRecord.js'
 import { SyncLog } from '../src/models/SyncLog.js';
 import { ScheduledEmail } from '../src/models/ScheduledEmail.js';
 import { progressBlock, dispatchBlock, manpowerBlock, synopsisTable, day } from './helpers/sheets.js';
+import jwt from 'jsonwebtoken';
+import { app } from '../src/app.js';
 
 // A real MongoDB (in memory, single-node replica set so transactions work) — never the database
 // in server/.env, which test/helpers/env.js points at an address nothing listens on.
@@ -73,19 +76,42 @@ const JAN = synopsisTable(['01.01.26', '02.01.26', '03.01.26'], [
 ]);
 const FEB = synopsisTable(['01.02.26', '02.02.26', '03.02.26'], [['Solar', 500, 90, 95, 99]]);
 
-function sources({ tabs = liveTabs(), files = { jan: JAN, feb: FEB }, failing = [] } = {}) {
+// Drive stamps a file's modifiedTime when its contents change, and the sync uses that to decide
+// whether a download is needed at all. So the fakes derive each timestamp from the content they
+// are serving: identical content looks untouched (and is skipped), edited content does not.
+// A fixed timestamp would make every "second run with different figures" here silently skip.
+function stamp(content, base = '2026-09-12T08:00:00Z') {
+  const digest = crypto.createHash('sha1').update(JSON.stringify(content)).digest().readUInt16BE(0);
+  return new Date(new Date(base).getTime() + digest * 1000);
+}
+
+function sources({ tabs = liveTabs(), files = { jan: JAN, feb: FEB }, failing = [], downloads = null } = {}) {
   return {
-    openLiveWorkbook: async () => ({
-      fileId: 'live-file',
-      modifiedTime: new Date('2026-09-10T08:00:00Z'),
-      getSheetValues: (title) => {
-        if (tabs[title] instanceof Error) throw tabs[title];
-        return tabs[title] ?? [];
-      },
-    }),
+    openLiveWorkbook: async ({ knownModifiedTime = null } = {}) => {
+      const modifiedTime = stamp(tabs, '2026-09-10T08:00:00Z');
+      if (knownModifiedTime && new Date(knownModifiedTime).getTime() === modifiedTime.getTime()) {
+        downloads?.push('live:skipped');
+        return { unchanged: true, fileId: 'live-file', name: 'live.xlsx', modifiedTime };
+      }
+      downloads?.push('live');
+      return {
+        fileId: 'live-file',
+        modifiedTime,
+        getSheetValues: (title) => {
+          if (tabs[title] instanceof Error) throw tabs[title];
+          return tabs[title] ?? [];
+        },
+      };
+    },
     listFolderWorkbooks: async () =>
-      Object.keys(files).map((id) => ({ id, name: `${id}.xlsx`, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', modifiedTime: '2026-09-12T08:00:00Z' })),
+      Object.keys(files).map((id) => ({
+        id,
+        name: `${id}.xlsx`,
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        modifiedTime: stamp(files[id]).toISOString(),
+      })),
     getWorkbookRows: async (id) => {
+      downloads?.push(id);
       if (failing.includes(id)) throw new Error(`download of ${id} failed`);
       return files[id];
     },
@@ -223,9 +249,48 @@ describe('synopsis sync', () => {
 
   test('…but never after a run in which a workbook failed to download', async () => {
     await runSync('manual', sources());
-    const log = await runSync('manual', sources({ files: { jan: JAN, feb: FEB }, failing: ['feb'] }));
+    // February has been edited since (so it is not skipped as unchanged) and its download then
+    // fails. The month it already had must survive a run that could not read it.
+    const editedFeb = synopsisTable(['01.02.26', '02.02.26', '03.02.26'], [['Solar', 500, 91, 95, 99]]);
+    const log = await runSync('manual', sources({ files: { jan: JAN, feb: editedFeb }, failing: ['feb'] }));
     assert.equal(log.status, 'partial');
     assert.equal(await SynopsisMonth.countDocuments({ month: '2026-02' }), 1);
+  });
+
+  // Bandwidth: Render's free tier suspends the workspace at 5 GB, and re-downloading every
+  // workbook on every run was most of it.
+  test('workbooks unchanged in Drive are not downloaded again, and their months are kept', async () => {
+    await runSync('manual', sources());
+    const before = await counts();
+    const downloads = [];
+    const log = await runSync('manual', sources({ downloads }));
+
+    assert.deepEqual(downloads, ['live:skipped'], 'no workbook bytes fetched at all on the second run');
+    assert.deepEqual(await counts(), before, 'and nothing stored was changed or cleaned away');
+    assert.ok(log.issues.some((i) => /Unchanged in Drive/.test(i.message) && i.severity === 'info'));
+    assert.ok(log.issues.some((i) => /unchanged in Drive/.test(i.message) && i.severity === 'info'));
+    assert.equal(log.status, 'success', 'a run with nothing to do is a success, not a failure');
+  });
+
+  test('an edited workbook is downloaded and rewritten', async () => {
+    await runSync('manual', sources());
+    const editedJan = synopsisTable(['01.01.26', '02.01.26', '03.01.26'], [
+      ['Solar', 500, 100, 110, 130],
+      ['Ramboll Domestic', 200, 40, 0, 30],
+      ['Ramboll Export', 100, 20, 25, null],
+    ]);
+    const downloads = [];
+    await runSync('manual', sources({ files: { jan: editedJan, feb: FEB }, downloads }));
+
+    assert.deepEqual(downloads, ['live:skipped', 'jan'], 'only the edited workbook is fetched');
+    assert.equal((await SynopsisMonth.findOne({ month: '2026-01' }).lean()).dispatchedTotal, 455);
+  });
+
+  test('a failed run does not record the version, so the next run reads the sheet again', async () => {
+    await runSync('manual', sources({ tabs: liveTabs({ Manpower: new Error('Drive hiccup') }) }));
+    const downloads = [];
+    await runSync('manual', sources({ tabs: liveTabs({ Manpower: new Error('Drive hiccup') }), downloads }));
+    assert.ok(downloads.includes('live'), 'the live workbook is downloaded again after a failed parse');
   });
 
   test('two workbooks for one month: the newer is used and the clash reported', async () => {
@@ -286,5 +351,121 @@ describe('email scheduler', () => {
     await runDueScheduledEmails(async () => { calls += 1; });
     assert.equal(calls, 0);
     assert.equal((await ScheduledEmail.findOne({ subject: 'orphan' })).status, 'unknown');
+  });
+});
+
+// --- bandwidth ------------------------------------------------------------------------------
+// Render's Hobby workspace allows 5 GB of bandwidth a month, and the service was being suspended
+// every five or six days. These cover the three things that were spending it: the whole sync log
+// going out on a one-minute poll, uncompressed JSON, and payloads that could never be reused.
+
+describe('API bandwidth', () => {
+  let server;
+  let base;
+  before(async () => {
+    server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    base = `http://127.0.0.1:${server.address().port}/api`;
+  });
+  after(() => server.close());
+
+  const cookie = `session=${jwt.sign({ sub: '64b000000000000000000001', email: 'admin@salasartechno.com', role: 'admin' }, 'test-jwt-secret', { expiresIn: '1h' })}`;
+  const get = (path, headers = {}) => fetch(`${base}${path}`, { headers: { cookie, origin: 'http://localhost:5173', ...headers } });
+
+  // A real run's log: dozens of notes about the sheet's own data, which is what made the polled
+  // answer tens of KB.
+  const noisyLog = () =>
+    SyncLog.create({
+      trigger: 'cron',
+      status: 'partial',
+      startedAt: new Date('2026-09-20T16:00:00Z'),
+      finishedAt: new Date('2026-09-20T16:01:00Z'),
+      rowsUpserted: 1200,
+      tabsProcessed: ['Manpower', 'Synopsis/2026-01', 'Synopsis/2026-02'],
+      issues: Array.from({ length: 60 }, (_, i) => ({
+        tab: 'Manpower',
+        message: `Row ${i}: the sheet's own total disagrees with its daily figures by 12.5 MT, so the daily figures were used.`,
+        severity: i % 3 === 0 ? 'info' : i === 7 ? 'error' : 'warning',
+      })),
+      sources: [{ name: 'Manpower', fileId: 'live-file', parsed: 900, inserted: 12, updated: 3, unchanged: 885, durationMs: 4200 }],
+    });
+
+  test('the polled status carries counts, not the whole log', async () => {
+    await noisyLog();
+    const res = await get('/sync/status');
+    const body = await res.json();
+    const bytes = Buffer.byteLength(JSON.stringify(body));
+
+    assert.equal(res.status, 200);
+    assert.equal(body.latestSync.issues, undefined, 'no issue text in the polled answer');
+    assert.equal(body.latestSync.sources, undefined);
+    assert.equal(body.latestSync.issueCount, 40, 'errors and warnings, not the routine notes');
+    assert.equal(body.latestSync.errorCount, 1);
+    assert.deepEqual(body.latestSync.synopsisMonths, ['2026-01', '2026-02']);
+    assert.ok(bytes < 500, `the badge's answer should be a few hundred bytes, was ${bytes}`);
+  });
+
+  test('the full log is still available, on request', async () => {
+    await noisyLog();
+    const body = await (await get('/sync/status?detail=1')).json();
+    assert.equal(body.latestSync.issues.length, 60);
+    assert.equal(body.latestSync.sources.length, 1);
+    assert.ok(Buffer.byteLength(JSON.stringify(body)) > 5000, 'this is the payload that used to be polled every minute');
+  });
+
+  test('an unchanged status costs a 304 with no body', async () => {
+    await noisyLog();
+    const first = await get('/sync/status');
+    const etag = first.headers.get('etag');
+    assert.ok(etag, 'an ETag is sent');
+
+    const second = await get('/sync/status', { 'if-none-match': etag });
+    assert.equal(second.status, 304);
+    assert.equal(await second.text(), '');
+  });
+
+  test('a later sync changes the ETag, so a new answer is still delivered', async () => {
+    await noisyLog();
+    const etag = (await get('/sync/status')).headers.get('etag');
+    await runSync('manual', sources());
+    const after = await get('/sync/status', { 'if-none-match': etag });
+    assert.equal(after.status, 200);
+    assert.notEqual(after.headers.get('etag'), etag);
+  });
+
+  test('dashboard payloads are gzipped, cached and revalidated', async () => {
+    await runSync('manual', sources());
+    const path = '/dashboard/hsd/summary?from=2026-08-01&to=2026-08-31';
+
+    const first = await get(path, { 'accept-encoding': 'gzip' });
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('content-encoding'), 'gzip');
+    const body = await first.json();
+    assert.equal(body.generatedAt, undefined, 'nothing that changes on every request');
+    assert.ok(body.dataAsOf, 'when the figures were synced is still there');
+
+    const etag = first.headers.get('etag');
+    const second = await get(path, { 'if-none-match': etag });
+    assert.equal(second.status, 304, 'a reload of unchanged figures sends no body at all');
+
+    // Same query again from a different browser: served from memory, identical bytes.
+    const third = await get(path);
+    assert.deepEqual(await third.json(), body);
+    assert.equal(third.headers.get('etag'), etag);
+  });
+
+  test('a sync that writes rows invalidates the cached payload', async () => {
+    await runSync('manual', sources());
+    const path = '/dashboard/hsd/summary?from=2026-08-01&to=2026-08-31';
+    const etag = (await get(path)).headers.get('etag');
+
+    const edited = liveTabs({
+      Manpower: [manpowerBlock(['2026-08-03', '2026-08-04', '2026-08-05'], [['HSD Fab.MNP.', [90, 5, 2], [80, 4, 0], [70, 3, 2]]])],
+    });
+    await runSync('manual', sources({ tabs: edited }));
+
+    const after = await get(path, { 'if-none-match': etag });
+    assert.equal(after.status, 200, 'the new figures are served, not a 304');
+    assert.notEqual(after.headers.get('etag'), etag);
   });
 });

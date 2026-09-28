@@ -50,24 +50,33 @@ async function getDrive() {
 // for five seconds instead, so a sync whose Manpower step ran longer than that read the progress
 // and dispatch tabs from a second download — two versions of a sheet that is edited all day,
 // mixed in one run.
-export async function openLiveWorkbook() {
+// The metadata and the bytes used to be fetched together, in parallel, because the metadata was
+// only ever used for the log. Now the metadata is fetched first and decides whether the bytes
+// are worth downloading at all: the sheet is hand-edited once a day, so most runs find it
+// unchanged, and ~400 KB becomes a few hundred bytes. `knownModifiedTime` is the version the
+// last successful parse was made from (models/SyncState.js); pass null to force a download.
+export async function openLiveWorkbook({ knownModifiedTime = null } = {}) {
   const drive = await getDrive();
-  const [meta, res] = await Promise.all([
-    withRetry(() => drive.files.get(
-      { fileId: env.hsdSpreadsheetId, fields: 'id, name, modifiedTime', supportsAllDrives: true },
-      { timeout: DRIVE_TIMEOUT_MS },
-    )),
-    withRetry(() => drive.files.get(
-      { fileId: env.hsdSpreadsheetId, alt: 'media', supportsAllDrives: true },
-      { responseType: 'arraybuffer', timeout: DRIVE_TIMEOUT_MS },
-    )),
-  ]);
+  const meta = await withRetry(() => drive.files.get(
+    { fileId: env.hsdSpreadsheetId, fields: 'id, name, modifiedTime', supportsAllDrives: true },
+    { timeout: DRIVE_TIMEOUT_MS },
+  ));
+  const modifiedTime = meta.data.modifiedTime ? new Date(meta.data.modifiedTime) : null;
+
+  if (knownModifiedTime && modifiedTime && modifiedTime.getTime() === new Date(knownModifiedTime).getTime()) {
+    return { unchanged: true, fileId: meta.data.id, name: meta.data.name, modifiedTime };
+  }
+
+  const res = await withRetry(() => drive.files.get(
+    { fileId: env.hsdSpreadsheetId, alt: 'media', supportsAllDrives: true },
+    { responseType: 'arraybuffer', timeout: DRIVE_TIMEOUT_MS },
+  ));
 
   const workbook = XLSX.read(Buffer.from(res.data), { type: 'buffer', cellDates: false });
   return {
     fileId: meta.data.id,
     name: meta.data.name,
-    modifiedTime: meta.data.modifiedTime ? new Date(meta.data.modifiedTime) : null,
+    modifiedTime,
     // A tab that has been renamed or removed reads as empty; the parsers then report that no
     // header rows were found rather than failing the whole run.
     getSheetValues(sheetTitle) {

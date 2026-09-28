@@ -1,8 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
-import { triggerSync, API_BASE } from '../../lib/api';
+import { triggerSync, fetchSyncStatus, API_BASE } from '../../lib/api';
 
 const STATUS_COLOR = {
   success: 'var(--status-good)',
@@ -16,6 +17,17 @@ export function SyncStatusBadge({ status, onSynced }) {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+
+  // The warnings — dozens of them, describing the sheet's own data problems — are the bulk of a
+  // sync log, and nobody reads them unless they open this panel. So they are fetched when it is
+  // opened, once, and not sent with the badge every other page load.
+  const detailQuery = useQuery({
+    queryKey: ['sync-status', 'detail'],
+    queryFn: () => fetchSyncStatus({ detail: true }),
+    enabled: detailsOpen,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
 
   if (!status) return null;
 
@@ -38,12 +50,12 @@ export function SyncStatusBadge({ status, onSynced }) {
 
   const log = status.latestSync;
   const dotColor = STATUS_COLOR[log?.status] || 'var(--text-muted)';
-  const issues = log?.issues ?? [];
-  // Routine notes (stale rows tidied up, vehicle blocks skipped) are listed but not counted:
-  // counting them made every run look like it had problems, so a real one could not stand out.
-  const problems = issues.filter((issue) => issue.severity !== 'info');
-  const hasErrors = issues.some((issue) => issue.severity === 'error');
-  const synopsisTabs = (log?.tabsProcessed ?? []).filter((tab) => tab.startsWith('Synopsis/'));
+  // Routine notes (stale rows tidied up, vehicle blocks skipped) are counted separately by the
+  // server: counting them made every run look like it had problems, so a real one could not
+  // stand out. The badge gets the counts; the text of each issue arrives only if it is opened.
+  const problemCount = log?.issueCount ?? 0;
+  const hasErrors = (log?.errorCount ?? 0) > 0;
+  const synopsisMonths = log?.synopsisMonths ?? [];
 
   async function handleSyncNow() {
     setSyncing(true);
@@ -89,13 +101,13 @@ export function SyncStatusBadge({ status, onSynced }) {
           : log?.finishedAt
             ? `Synced ${formatDistanceToNow(new Date(log.finishedAt), { addSuffix: true })}`
             : 'Awaiting first sync'}
-        {problems.length > 0 && (
+        {problemCount > 0 && (
           <span
             className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
             style={{ background: hasErrors ? 'var(--status-critical)' : 'var(--status-warning)', color: '#ffffff' }}
-            title={`${problems.length} issue(s) need attention`}
+            title={`${problemCount} issue(s) need attention`}
           >
-            {problems.length}
+            {problemCount}
           </span>
         )}
       </button>
@@ -121,7 +133,9 @@ export function SyncStatusBadge({ status, onSynced }) {
         </div>
       )}
 
-      {detailsOpen && log && (
+      {detailsOpen && log && (() => {
+        const issues = detailQuery.data?.latestSync?.issues ?? [];
+        return (
         <div
           className="absolute top-full right-0 z-30 mt-2 w-80 rounded-xl border p-3 text-xs shadow-lg"
           style={{ background: 'var(--surface-2)' }}
@@ -134,14 +148,14 @@ export function SyncStatusBadge({ status, onSynced }) {
           </div>
 
           <div className="mb-2" style={{ color: 'var(--text-secondary)' }}>
-            {synopsisTabs.length > 0
-              ? `Dispatch Synopsis: read ${synopsisTabs.length} month${synopsisTabs.length === 1 ? '' : 's'} (${synopsisTabs
-                  .map((t) => t.replace('Synopsis/', ''))
-                  .join(', ')}).`
+            {synopsisMonths.length > 0
+              ? `Dispatch Synopsis: read ${synopsisMonths.length} month${synopsisMonths.length === 1 ? '' : 's'} (${synopsisMonths.join(', ')}).`
               : 'Dispatch Synopsis: no monthly workbooks were read in this run.'}
           </div>
 
-          {issues.length === 0 ? (
+          {detailQuery.isPending ? (
+            <div style={{ color: 'var(--text-muted)' }}>Loading the run's notes…</div>
+          ) : issues.length === 0 ? (
             <div style={{ color: 'var(--text-muted)' }}>No issues reported.</div>
           ) : (
             <ul className="max-h-56 space-y-1.5 overflow-auto">
@@ -159,7 +173,8 @@ export function SyncStatusBadge({ status, onSynced }) {
             </ul>
           )}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

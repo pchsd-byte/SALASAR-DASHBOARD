@@ -2,7 +2,6 @@ import http from 'http';
 import { app } from './app.js';
 import { env } from './config/env.js';
 import { connectDb } from './config/db.js';
-import { initSocket } from './sockets/index.js';
 import { startSyncCron } from './jobs/cron.js';
 import { startEmailSchedulerCron } from './jobs/emailScheduler.js';
 import { startKeepAliveCron } from './jobs/keepAlive.js';
@@ -18,8 +17,10 @@ process.on('unhandledRejection', (reason) => {
 async function main() {
   await connectDb();
 
+  // No websocket server any more: the dashboard reads /api/sync/status when the page loads and
+  // after an admin runs a sync, and asks for nothing in between. A socket held
+  // open by every visitor cost bandwidth all day to announce a sync that now happens once.
   const httpServer = http.createServer(app);
-  initSocket(httpServer);
   startSyncCron();
   startEmailSchedulerCron();
   startKeepAliveCron();

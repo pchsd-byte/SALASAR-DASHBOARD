@@ -4,6 +4,7 @@ import { DispatchRecord } from '../models/DispatchRecord.js';
 import { Target } from '../models/Target.js';
 import { SyncLog } from '../models/SyncLog.js';
 import { roundDeep } from '../utils/roundNumbers.js';
+import { getOrBuild, cacheKey, sendCached } from '../services/payloadCache.js';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // The plant works on India Standard Time. Sheet dates are stored as UTC midnight of the IST
@@ -361,8 +362,22 @@ export async function latestDataAsOf() {
 export async function getHsdSummary(req, res) {
   const { from, to } = parseDateRange(req.query);
   const { businessUnit, client } = parseFilters(req.query);
-  const [summary, dataAsOf] = await Promise.all([buildHsdSummaryData(from, to, businessUnit, client), latestDataAsOf()]);
-  res.json({ ...summary, dataAsOf, generatedAt: new Date() });
+
+  // Built once per range and kept until a sync writes something. The answer depends only on the
+  // stored records and the query, never on who is asking, so one plant-wide cache serves
+  // everybody — twenty dashboards on the same range now cost one aggregation between syncs.
+  //
+  // The payload used to carry `generatedAt: new Date()`, which nothing on the client read and
+  // which made every response differ from the last one, so no browser could ever reuse a
+  // cached copy. It is gone: `dataAsOf` says what actually matters, when the figures came from.
+  const { payload, etag } = await getOrBuild(
+    cacheKey(['hsd-summary', from.toISOString(), to.toISOString(), businessUnit ?? '', client ?? '']),
+    async () => {
+      const [summary, dataAsOf] = await Promise.all([buildHsdSummaryData(from, to, businessUnit, client), latestDataAsOf()]);
+      return { ...summary, dataAsOf };
+    },
+  );
+  return sendCached(req, res, { payload, etag });
 }
 
 export { parseDateRange, parseFilters };
@@ -376,6 +391,12 @@ export async function listManpowerRecords(req, res) {
   if (businessUnit) match.businessUnit = businessUnit;
   if (category) match.category = category;
 
-  const records = await ManpowerRecord.find(match).sort({ date: 1 }).lean();
-  res.json(records);
+  // Only the columns a caller can do anything with. This used to return whole documents —
+  // _id, __v, syncedAt, sourceRowIndex, sourceCol and all — which roughly doubled the size of
+  // a listing that can run to thousands of rows.
+  const { payload, etag } = await getOrBuild(
+    cacheKey(['manpower', from.toISOString(), to.toISOString(), businessUnit ?? '', category ?? '']),
+    () => ManpowerRecord.find(match).select('date businessUnit category shift count -_id').sort({ date: 1 }).lean(),
+  );
+  return sendCached(req, res, { payload, etag });
 }

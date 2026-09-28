@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import compression from 'compression';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
@@ -18,6 +19,10 @@ export const app = express();
 app.set('trust proxy', 1);
 
 app.use(helmet());
+// Every answer here is JSON — repetitive keys, dates and numbers — which gzips to roughly a
+// tenth of its size. On Render's free tier the workspace's 5 GB of bandwidth is the binding
+// constraint, so this is the single cheapest saving available.
+app.use(compression());
 app.use(cors({ origin: env.clientOrigin, credentials: true }));
 // Everything except the email routes stays on the small default body limit. The email routes
 // parse their own, larger body — after authentication (routes/email.routes.js).

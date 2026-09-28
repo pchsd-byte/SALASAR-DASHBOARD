@@ -84,7 +84,14 @@ export const env = {
   // separate from the single live HSD workbook above. Every file in it is read on each sync,
   // so a new month appears on the dashboard as soon as it is dropped in the folder.
   synopsisFolderId: process.env.SYNOPSIS_FOLDER_ID || '1RBlqtBL3l2qnyKxRzF0FZ_p7ruYKQRni',
-  syncIntervalMinutes: Number(process.env.SYNC_INTERVAL_MINUTES || 10),
+  // The workbook is filled in by hand, once a day, in the evening — so it is read once a day,
+  // after that. Syncing every ten minutes re-downloaded ~1.5 MB of unchanged workbooks 144
+  // times a day (~200 MB), which on Render's free tier exhausted the workspace's 5 GB of
+  // bandwidth every few days and suspended the service. A run can still be triggered by hand
+  // from Settings at any time, and a run whose files have not changed in Drive now costs a
+  // metadata call rather than a download.
+  syncCron: process.env.SYNC_CRON || '30 21 * * *',
+  syncTimezone: process.env.SYNC_TIMEZONE || 'Asia/Kolkata',
 
   geminiApiKey: process.env.GEMINI_API_KEY || null,
 

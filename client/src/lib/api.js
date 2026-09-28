@@ -55,8 +55,12 @@ export async function fetchManpowerRecords(params) {
   return data;
 }
 
-export async function fetchSyncStatus() {
-  const { data } = await api.get('/sync/status');
+// The badge's own summary: status, when it finished, how many issues. A few hundred bytes.
+// `detail` additionally pulls the run's full issue list, tab list and per-source rows — tens of
+// KB — so it is asked for only when somebody opens the details or the Settings page, never on
+// the every-page badge.
+export async function fetchSyncStatus({ detail = false } = {}) {
+  const { data } = await api.get('/sync/status', { params: detail ? { detail: 1 } : undefined });
   return data;
 }
 

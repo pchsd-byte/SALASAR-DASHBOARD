@@ -24,9 +24,13 @@ export function Settings() {
   const { user } = useAuth();
   const [disconnecting, setDisconnecting] = useState(false);
 
+  // The admin page is the one place that lists every warning the run reported, so it asks for
+  // the detailed status. The badge on every other page gets the short one.
   const syncStatusQuery = useQuery({
-    queryKey: ['sync-status'],
-    queryFn: fetchSyncStatus,
+    queryKey: ['sync-status', 'detail'],
+    queryFn: () => fetchSyncStatus({ detail: true }),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   });
 
   const status = syncStatusQuery.data;

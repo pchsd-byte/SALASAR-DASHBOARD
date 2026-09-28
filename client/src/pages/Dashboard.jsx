@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
@@ -12,7 +12,6 @@ import { InsightsPanel } from '../components/dashboard/InsightsPanel';
 import { SyncStatusBadge } from '../components/dashboard/SyncStatusBadge';
 import { SynopsisView } from '../components/dashboard/SynopsisView';
 import { ErrorBoundary } from '../components/layout/ErrorBoundary';
-import { useSyncSocket } from '../hooks/useSyncSocket';
 import { useAuth } from '../context/AuthContext';
 import { PC_HSD_EMAIL } from '../lib/constants';
 
@@ -72,39 +71,31 @@ export function Dashboard() {
     refetchOnMount: false,
   });
 
+  // Loaded once, with the page. It used to poll every 60 seconds from every open tab, and the
+  // answer carried the whole sync log — which on Render's free tier was most of the 5 GB of
+  // bandwidth that kept suspending the service. The sheets are filled in by hand once a day, so
+  // an open dashboard now makes no requests at all: the figures and the badge both refresh on a
+  // page reload, or when an admin runs "Sync now" below.
   const syncStatusQuery = useQuery({
     queryKey: ['sync-status'],
-    queryFn: fetchSyncStatus,
-    refetchInterval: 60_000,
+    queryFn: () => fetchSyncStatus(),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 
-  // The figures on screen are deliberately frozen for the session (above), while the sync badge
-  // updates live. Side by side, "Synced 2 minutes ago" read as "these numbers are two minutes
-  // old" when they could be hours old. The page now says which sync its figures came from, and
-  // offers — never forces — newer ones when a sync lands.
-  const [newerDataAvailable, setNewerDataAvailable] = useState(false);
-  const dataAsOfRef = useRef(null);
   const summary = summaryQuery.data;
-  dataAsOfRef.current = summary?.dataAsOf ?? null;
 
-  const handleSynced = useCallback(
-    (event) => {
-      queryClient.invalidateQueries({ queryKey: ['sync-status'] });
-      const wroteData = !event || event.status === 'success' || event.status === 'partial';
-      const newer = !event?.finishedAt || !dataAsOfRef.current || new Date(event.finishedAt) > new Date(dataAsOfRef.current);
-      if (wroteData && newer) setNewerDataAvailable(true);
-    },
-    [queryClient],
-  );
-
-  useSyncSocket(handleSynced);
-
-  function loadNewerFigures() {
-    setNewerDataAvailable(false);
+  // The only two things that fetch data: opening (or reloading) the page, and an admin running
+  // "Sync now". The server is no longer asked anything in between — no polling, no socket — so
+  // the figures on screen are simply those of the last page load, which is what "Figures as of
+  // the … sync" underneath them has always said.
+  const handleSynced = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['sync-status'] });
     queryClient.invalidateQueries({ queryKey: ['hsd-summary'] });
     queryClient.invalidateQueries({ queryKey: ['synopsis'] });
     queryClient.invalidateQueries({ queryKey: ['hsd-insights'] });
-  }
+  }, [queryClient]);
 
   const productionAvailable = summary?.production?.available ?? false;
   const dispatchAvailable = summary?.dispatch?.available ?? false;
@@ -123,22 +114,9 @@ export function Dashboard() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <ViewToggle view={view} onChange={setView} />
-          {user?.email !== PC_HSD_EMAIL && <SyncStatusBadge status={syncStatusQuery.data} onSynced={() => handleSynced()} />}
+          {user?.email !== PC_HSD_EMAIL && <SyncStatusBadge status={syncStatusQuery.data} onSynced={handleSynced} />}
         </div>
       </div>
-
-      {newerDataAvailable && (
-        <div
-          role="status"
-          className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-2.5 text-sm"
-          style={{ background: 'var(--surface-1)', color: 'var(--text-secondary)' }}
-        >
-          <span>Newer figures are available from the latest sync. The numbers below are unchanged until you refresh.</span>
-          <button onClick={loadNewerFigures} className="rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: 'var(--series-1)', color: '#ffffff' }}>
-            Refresh figures
-          </button>
-        </div>
-      )}
 
       {isSynopsis && <SynopsisView />}
 
