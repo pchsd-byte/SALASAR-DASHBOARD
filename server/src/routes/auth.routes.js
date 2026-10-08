@@ -11,7 +11,7 @@ import {
   handleGmailConnectCallback,
   getGmailSendStatus,
 } from '../controllers/auth.controller.js';
-import { requireAuth, requireAdmin, requireEmail } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireEmail, requireSection } from '../middleware/auth.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { env } from '../config/env.js';
 
@@ -26,9 +26,13 @@ router.get('/google/connect-drive', requireAuth, requireAdmin, redirectToDriveCo
 router.get('/google/connect-drive/callback', requireAuth, requireAdmin, asyncHandler(handleDriveConnectCallback));
 router.post('/google/disconnect-drive', requireAuth, requireAdmin, asyncHandler(disconnectDrive));
 
+// Granting the Gmail scope stays with EMAIL_USER: the reports leave from that mailbox, so only
+// that account can authorise it.
 const restrictedToEmailSender = requireEmail(env.emailUser);
 router.get('/google/connect-gmail', requireAuth, restrictedToEmailSender, redirectToGmailConnect);
 router.get('/google/connect-gmail/callback', requireAuth, restrictedToEmailSender, asyncHandler(handleGmailConnectCallback));
-router.get('/google/gmail-send-status', requireAuth, restrictedToEmailSender, asyncHandler(getGmailSendStatus));
+// Whether sending works is something every coordinator needs to see — otherwise the Email page
+// looks fine right up until a send fails. It says only whether the mailbox is connected.
+router.get('/google/gmail-send-status', requireAuth, requireSection('email'), asyncHandler(getGmailSendStatus));
 
 export default router;

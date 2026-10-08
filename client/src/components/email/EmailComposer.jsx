@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { sendReportEmail, scheduleReportEmail, fetchScheduledEmails, cancelScheduledEmail } from '../../lib/api';
-import { PC_HSD_EMAIL } from '../../lib/constants';
+import { useAuth } from '../../context/AuthContext';
 import { uploadBoxHtml, reportLineHtml } from './emailTemplates';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -127,6 +127,10 @@ export function EmailComposer({ defaultSubject, defaultTo, defaultCc, bodyHtml }
   const [showScheduler, setShowScheduler] = useState(false);
   const [scheduleAt, setScheduleAt] = useState(defaultScheduleValue);
   const [scheduleMessage, setScheduleMessage] = useState('');
+  // Whoever composes the report, it goes out from the one connected mailbox (EMAIL_USER on the
+  // server) — so the From line is read from the session rather than assumed.
+  const { user } = useAuth();
+  const emailSender = user?.emailSender;
   const bodyRef = useRef(null);
   const boxFileInputRef = useRef(null);
   const pendingBoxRef = useRef(null);
@@ -372,7 +376,7 @@ export function EmailComposer({ defaultSubject, defaultTo, defaultCc, bodyHtml }
               From
             </span>
             <div role="textbox" aria-readonly="true" aria-labelledby="from-label" className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--surface-2)', color: 'var(--text-secondary)' }}>
-              {PC_HSD_EMAIL}
+              {emailSender || 'the configured mailbox'}
             </div>
           </div>
 

@@ -2,9 +2,8 @@ import express, { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import mongoSanitize from 'express-mongo-sanitize';
 import { sendReport, scheduleReport, listScheduledEmails, cancelScheduledEmail } from '../controllers/email.controller.js';
-import { requireAuth, requireEmail } from '../middleware/auth.js';
+import { requireAuth, requireSection } from '../middleware/auth.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { env } from '../config/env.js';
 
 const router = Router();
 
@@ -23,7 +22,11 @@ const sendLimiter = rateLimit({
 // every other route — the app-level pass runs before this parser has filled req.body.
 const largeJson = [express.json({ limit: '20mb' }), mongoSanitize()];
 
-const restricted = [requireAuth, requireEmail(env.emailUser)];
+// Anyone an admin has given the Email section to — the plant has several process coordinators,
+// and this used to be one address from the environment. What they cannot do is change which
+// mailbox the reports leave from: that is EMAIL_USER's own Gmail grant (auth.routes.js), and
+// every send goes through it whoever composed it.
+const restricted = [requireAuth, requireSection('email')];
 
 router.post('/send', ...restricted, sendLimiter, ...largeJson, asyncHandler(sendReport));
 router.post('/schedule', ...restricted, sendLimiter, ...largeJson, asyncHandler(scheduleReport));

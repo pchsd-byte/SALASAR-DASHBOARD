@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { fetchSyncStatus, disconnectDrive } from '../lib/api';
 import { SyncStatusBadge } from '../components/dashboard/SyncStatusBadge';
+import { TeamAccessPanel } from '../components/settings/TeamAccessPanel';
 import { useAuth } from '../context/AuthContext';
 
 const DRIVE_CONNECT_MESSAGES = {
@@ -122,6 +123,8 @@ export function Settings() {
           </div>
         )}
       </div>
+
+      {user?.role === 'admin' && <TeamAccessPanel />}
     </div>
   );
 }

@@ -8,8 +8,10 @@ import {
   DRIVE_SYNC_SCOPES,
   GMAIL_SEND_SCOPES,
 } from '../config/google.js';
-import { env, isAllowedLogin, roleFor } from '../config/env.js';
+import { env } from '../config/env.js';
 import { User } from '../models/User.js';
+import { TeamMember } from '../models/TeamMember.js';
+import { resolveAccess } from '../services/access.service.js';
 import { GoogleToken } from '../models/GoogleToken.js';
 import { encryptText } from '../utils/crypto.js';
 
@@ -96,12 +98,16 @@ export async function handleGoogleLoginCallback(req, res) {
     if (payload.email_verified !== true) {
       return res.redirect(`${env.clientOrigin}/login?error=not_verified`);
     }
-    if (!isAllowedLogin(email)) {
+    // Who may sign in, what they may open, and what they are called on the plant now come from
+    // one place: ADMIN_EMAILS and the domain rules in the environment, plus whatever an admin has
+    // granted in Settings → People and access (services/access.service.js).
+    const access = await resolveAccess(email);
+    if (!access.allowed) {
       console.warn('[auth] sign-in refused for an account outside the allowed list');
       return res.redirect(`${env.clientOrigin}/login?error=not_allowed`);
     }
 
-    const role = roleFor(email);
+    const role = access.role;
 
     const user = await User.findOneAndUpdate(
       { googleId: payload.sub },
@@ -111,10 +117,15 @@ export async function handleGoogleLoginCallback(req, res) {
         name: payload.name || email,
         picture: payload.picture,
         role,
+        // The job title an admin typed when granting access; Google has no such field.
+        ...(access.title ? { title: access.title } : {}),
         lastLoginAt: new Date(),
       },
       { upsert: true, returnDocument: 'after' },
     );
+
+    // So the people list can show who has actually used their access, and when.
+    await TeamMember.updateOne({ email }, { $set: { lastLoginAt: new Date() } });
 
     issueSessionCookie(req, res, user);
     res.redirect(env.clientOrigin);
@@ -134,7 +145,14 @@ export async function getCurrentUser(req, res) {
     // The role the server enforces right now (middleware/auth.js), not the one stored at the
     // user's last sign-in — otherwise the UI and the API could disagree about what they may do.
     role: req.user.role,
-    title: user.title,
+    title: req.access?.title ?? user.title,
+    // Which parts of the app to show. The client uses this to draw the nav and guard its routes;
+    // every one of those sections is enforced again server-side on the request itself.
+    sections: req.user.sections ?? [],
+    // The mailbox every report is sent from. Shown as the "From" line on the Email page, which
+    // used to hard-code one address in the client even though the server reads it from
+    // EMAIL_USER — two places to change, and one of them a redeploy of the wrong app.
+    emailSender: env.emailUser,
   });
 }
 
@@ -271,5 +289,8 @@ export async function getGmailSendStatus(req, res) {
     connected: Boolean(tokenDoc),
     connectedByEmail: tokenDoc?.connectedByEmail ?? null,
     connectedAt: tokenDoc?.connectedAt ?? null,
+    // So a coordinator who cannot connect it themselves is told who can.
+    senderEmail: env.emailUser,
+    canConnect: req.user?.email?.toLowerCase() === env.emailUser?.toLowerCase(),
   });
 }

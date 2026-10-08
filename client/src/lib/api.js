@@ -74,6 +74,28 @@ export async function disconnectDrive() {
   return data;
 }
 
+// People and access (admin only). The email address is the key: these records are created
+// before the person has ever signed in, so there is no id yet.
+export async function fetchTeam() {
+  const { data } = await api.get('/users');
+  return data;
+}
+
+export async function addTeamMember(member) {
+  const { data } = await api.post('/users', member);
+  return data;
+}
+
+export async function updateTeamMember(email, changes) {
+  const { data } = await api.patch(`/users/${encodeURIComponent(email)}`, changes);
+  return data;
+}
+
+export async function removeTeamMember(email) {
+  const { data } = await api.delete(`/users/${encodeURIComponent(email)}`);
+  return data;
+}
+
 export async function fetchTargets() {
   const { data } = await api.get('/targets');
   return data;

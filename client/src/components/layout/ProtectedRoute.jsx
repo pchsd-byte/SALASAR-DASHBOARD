@@ -1,7 +1,8 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { canOpen, landingFor } from '../../lib/sections';
 
-export function ProtectedRoute({ children, adminOnly = false, allowedEmails }) {
+export function ProtectedRoute({ children, adminOnly = false, section }) {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -13,8 +14,10 @@ export function ProtectedRoute({ children, adminOnly = false, allowedEmails }) {
   }
 
   if (!user) return <Navigate to="/login" replace />;
-  if (adminOnly && user.role !== 'admin') return <Navigate to="/" replace />;
-  if (allowedEmails && !allowedEmails.includes(user.email)) return <Navigate to="/" replace />;
+  if (adminOnly && user.role !== 'admin') return <Navigate to={landingFor(user)} replace />;
+  // Sections are granted per person in Settings → People and access. This hides the page; the
+  // API refuses the data regardless, which is the check that actually protects it.
+  if (section && !canOpen(user, section)) return <Navigate to={landingFor(user)} replace />;
 
   return children;
 }

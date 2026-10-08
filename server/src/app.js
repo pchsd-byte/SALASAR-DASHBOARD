@@ -13,6 +13,7 @@ import dashboardRoutes from './routes/dashboard.routes.js';
 import syncRoutes from './routes/sync.routes.js';
 import targetRoutes from './routes/target.routes.js';
 import emailRoutes from './routes/email.routes.js';
+import userRoutes from './routes/user.routes.js';
 
 export const app = express();
 
@@ -88,6 +89,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/targets', targetRoutes);
 app.use('/api/email', emailRoutes);
+app.use('/api/users', userRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 

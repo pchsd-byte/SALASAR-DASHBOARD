@@ -119,9 +119,15 @@ export function Email() {
           style={{ color: 'var(--status-warning)' }}
         >
           <span>Gmail sending isn't connected yet — nothing can be sent until this is done.</span>
-          <a href={`${API_BASE}/api/auth/google/connect-gmail`} className={`shrink-0 underline ${FOCUS_RING}`}>
-            Connect Gmail
-          </a>
+          {/* Only the mailbox the reports are sent from can grant the Gmail scope; everybody else
+              is told who to ask rather than shown a link that refuses them. */}
+          {gmailStatusQuery.data.canConnect ? (
+            <a href={`${API_BASE}/api/auth/google/connect-gmail`} className={`shrink-0 underline ${FOCUS_RING}`}>
+              Connect Gmail
+            </a>
+          ) : (
+            <span className="shrink-0">Ask {gmailStatusQuery.data.senderEmail} to connect it.</span>
+          )}
         </div>
       )}
 

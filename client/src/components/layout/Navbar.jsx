@@ -1,17 +1,16 @@
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
-import { PC_HSD_EMAIL } from '../../lib/constants';
+import { canOpen } from '../../lib/sections';
 
+// Every link is a section an admin grants in Settings → People and access. Settings is also
+// admin-only: being allowed to read the sync log is not the same as being allowed to change who
+// may sign in.
 const links = [
-  { to: '/', label: 'Dashboard' },
-  { to: '/settings', label: 'Settings', adminOnly: true },
-  { to: '/email', label: 'Email', allowedEmails: [PC_HSD_EMAIL] },
+  { to: '/', label: 'Dashboard', section: 'dashboard' },
+  { to: '/settings', label: 'Settings', section: 'settings' },
+  { to: '/email', label: 'Email', section: 'email' },
 ];
-
-const DISPLAY_NAME_OVERRIDES = {
-  [PC_HSD_EMAIL]: 'Process Coordinator',
-};
 
 export function Navbar() {
   const { user, logout } = useAuth();
@@ -36,8 +35,7 @@ export function Navbar() {
 
         <nav className="flex items-center gap-1">
           {links
-            .filter((l) => !l.adminOnly || user?.role === 'admin')
-            .filter((l) => !l.allowedEmails || l.allowedEmails.includes(user?.email))
+            .filter((link) => canOpen(user, link.section))
             .map((link) => (
               <NavLink
                 key={link.to}
@@ -63,10 +61,12 @@ export function Navbar() {
         <div className="flex items-center gap-3">
           <div className="text-right leading-tight">
             <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-              {DISPLAY_NAME_OVERRIDES[user.email] || user.name}
+              {user.name}
             </div>
-            <div className="text-xs capitalize" style={{ color: 'var(--text-muted)' }}>
-              {user.title || user.role}
+            {/* Their job on the plant, as the admin typed it when granting access ("Process
+                Coordinator — HSD"); their access level only shows when nobody has set one. */}
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {user.title || (user.role === 'admin' ? 'Admin' : 'Manager')}
             </div>
           </div>
           {user.picture ? (

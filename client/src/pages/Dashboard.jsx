@@ -12,8 +12,6 @@ import { InsightsPanel } from '../components/dashboard/InsightsPanel';
 import { SyncStatusBadge } from '../components/dashboard/SyncStatusBadge';
 import { SynopsisView } from '../components/dashboard/SynopsisView';
 import { ErrorBoundary } from '../components/layout/ErrorBoundary';
-import { useAuth } from '../context/AuthContext';
-import { PC_HSD_EMAIL } from '../lib/constants';
 
 const UNIT_LABEL = { HSD: 'HSD', BU: 'Bhilai' };
 
@@ -49,7 +47,6 @@ export function Dashboard() {
   const [range, setRange] = useState(PRESETS[3].getRange());
   const [businessUnit, setBusinessUnit] = useState('HSD');
   const queryClient = useQueryClient();
-  const { user } = useAuth();
 
   const params = {
     from: format(range.from, 'yyyy-MM-dd'),
@@ -114,7 +111,7 @@ export function Dashboard() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <ViewToggle view={view} onChange={setView} />
-          {user?.email !== PC_HSD_EMAIL && <SyncStatusBadge status={syncStatusQuery.data} onSynced={handleSynced} />}
+          <SyncStatusBadge status={syncStatusQuery.data} onSynced={handleSynced} />
         </div>
       </div>
 

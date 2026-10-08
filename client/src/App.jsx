@@ -7,7 +7,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Settings } from './pages/Settings';
 import { Email } from './pages/Email';
-import { PC_HSD_EMAIL } from './lib/constants';
+import { NoAccess } from './pages/NoAccess';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -30,9 +30,19 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route
-              path="/"
+              path="/no-access"
               element={
                 <ProtectedRoute>
+                  <AppShell>
+                    <NoAccess />
+                  </AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute section="dashboard">
                   <AppShell>
                     <Dashboard />
                   </AppShell>
@@ -42,7 +52,7 @@ export default function App() {
             <Route
               path="/settings"
               element={
-                <ProtectedRoute adminOnly>
+                <ProtectedRoute section="settings">
                   <AppShell>
                     <Settings />
                   </AppShell>
@@ -52,7 +62,7 @@ export default function App() {
             <Route
               path="/email"
               element={
-                <ProtectedRoute allowedEmails={[PC_HSD_EMAIL]}>
+                <ProtectedRoute section="email">
                   <AppShell>
                     <Email />
                   </AppShell>
