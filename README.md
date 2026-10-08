@@ -6,7 +6,7 @@
 
 **A production, dispatch and manpower dashboard for the Heavy Structure Division — built on top of the spreadsheet the plant already keeps, so nobody had to change how they record data.**
 
-[![Live](https://img.shields.io/badge/demo-live-brightgreen)](https://salasar-dashboard.vercel.app/)
+[![Live](https://img.shields.io/badge/AI-live-brightgreen)](https://salasar-dashboard.vercel.app/)
 ![MERN](https://img.shields.io/badge/stack-MERN-6e56cf)
 ![React](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61dafb)
 ![Node](https://img.shields.io/badge/backend-Node%20%2B%20Express-339933)
