@@ -245,7 +245,7 @@ All under `/api`. Every route except `/health`, `/health/deep`, `/auth/google*`,
 |---|---|---|
 | `/login` | public | Google button only. |
 | `/` | authenticated | Dashboard — **Overview** / **Dispatch Synopsis** toggle. |
-| `/settings` | `section="settings"` | Drive connection, sync log, and — admins only — **People and access**. (There is no targets UI — `TargetPanel.jsx` is not rendered anywhere.) |
+| `/settings` | `section="settings"` | Two tabs for an admin — **People and access** (opens first; it is what they come here for) and **Google Drive sync**. A manager with only the section sees the Drive card alone. Returning from a Drive connection (`?driveConnect=`) opens the Drive tab. (There is no targets UI — `TargetPanel.jsx` is not rendered anywhere.) |
 | `/email` | `section="email"` | Report composer + scheduler. |
 | `/no-access` | authenticated | For somebody allowed to sign in who has no section yet. |
 
@@ -285,7 +285,7 @@ All three flows carry an OAuth `state` (random value in a 10-minute `oauth_state
 
 Who may sign in, and what they may open. One function, `resolveAccess(email)`, used at sign-in and again on every request (`middleware/auth.js`), answering `{ allowed, role, title, sections }`.
 
-Sections are `dashboard`, `email`, `settings`. An **admin** gets all of them plus the people list itself; a **manager** gets exactly what was ticked. `title` is their job on the plant ("Process Coordinator — Unit 2") and shows in the navbar — it replaced a hard-coded name for one address.
+Sections are `dashboard`, `email`, `settings`. An **admin** gets `ADMIN_SECTIONS` — everything **except `email`** — plus the people list itself; a **manager** gets exactly what was ticked. Email is left out of an admin's implied set deliberately: the composer, drafts and send queue belong to the coordinators who write the reports, not to whoever administers Drive and access. An admin who does write reports is ticked for it like anyone else, and `EMAIL_USER` always keeps it. There is no "admin sees everything" shortcut in `canUseSection` or the client's `canOpen` — sections are the whole answer, and `requireAdmin` (role) is what still guards Drive, manual syncs and the people list. `title` is their job on the plant ("Process Coordinator — Unit 2") and shows in the navbar — it replaced a hard-coded name for one address.
 
 Two sources, in this order:
 

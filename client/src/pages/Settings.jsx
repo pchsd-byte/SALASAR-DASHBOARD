@@ -18,12 +18,22 @@ const DRIVE_CONNECT_MESSAGES = {
   invalid_state: { text: 'That connection link was not started from this page, or has expired. Please try again.', good: false },
 };
 
+const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--series-1)]';
+
 export function Settings() {
   const [params] = useSearchParams();
   const driveConnect = params.get('driveConnect');
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const [disconnecting, setDisconnecting] = useState(false);
+  const isAdmin = user?.role === 'admin';
+
+  // Two panels on one page meant scrolling past the whole Drive card — status, warnings and all
+  // — to reach the people list, which is what an admin comes here to use. They are tabs now,
+  // and the people list opens first. Coming back from a Drive connection lands on Drive, since
+  // that is the result the admin is here to see.
+  const [tab, setTab] = useState(driveConnect ? 'drive' : 'people');
+  const activeTab = isAdmin ? tab : 'drive';
 
   // The admin page is the one place that lists every warning the run reported, so it asks for
   // the detailed status. The badge on every other page gets the short one.
@@ -51,10 +61,36 @@ export function Settings() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-6">
-      <h1 className="mb-6 text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-        Settings
-      </h1>
+    <div className="mx-auto max-w-4xl px-6 py-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
+          Settings
+        </h1>
+
+        {isAdmin && (
+          <div className="flex gap-1 rounded-xl border p-1" style={{ background: 'var(--surface-1)' }} role="tablist" aria-label="Settings sections">
+            {[
+              { key: 'people', label: 'People and access' },
+              { key: 'drive', label: 'Google Drive sync' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === key}
+                onClick={() => setTab(key)}
+                className={`rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${FOCUS_RING}`}
+                style={{
+                  background: activeTab === key ? 'var(--series-1)' : 'transparent',
+                  color: activeTab === key ? '#ffffff' : 'var(--text-secondary)',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {message && (
         <div
@@ -65,7 +101,7 @@ export function Settings() {
         </div>
       )}
 
-      <div className="rounded-2xl border p-5" style={{ background: 'var(--surface-1)' }}>
+      <div className="rounded-2xl border p-5" hidden={activeTab !== 'drive'} style={{ background: 'var(--surface-1)' }}>
         <div className="mb-4 flex items-center justify-between">
           <div>
             <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -124,7 +160,7 @@ export function Settings() {
         )}
       </div>
 
-      {user?.role === 'admin' && <TeamAccessPanel />}
+      {isAdmin && activeTab === 'people' && <TeamAccessPanel />}
     </div>
   );
 }

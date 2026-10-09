@@ -242,6 +242,7 @@ describe('people and access', () => {
     assert.equal(member.role, 'manager');
     assert.deepEqual(member.sections, ['email']);
     assert.deepEqual(list.sections.map((s) => s.key), ['dashboard', 'email', 'settings'], 'the UI reads the section list from the server');
+    assert.deepEqual(list.adminSections, ['dashboard', 'settings'], 'and which of them an admin gets without ticking');
   });
 
   test('changing access takes effect without the person signing in again', async () => {
@@ -261,11 +262,31 @@ describe('people and access', () => {
     assert.equal(res.status, 403);
   });
 
-  test('an admin granted here gets everything, including the people list', async () => {
+  test('an admin granted here gets the people list and the figures — but not Email', async () => {
     await addMember({ email: 'secondadmin@salasartechno.com', role: 'admin', sections: [] });
     const cookie = cookieFor('secondadmin@salasartechno.com');
     assert.equal((await call('/users', { cookie })).status, 200);
-    assert.equal((await call('/email/scheduled', { cookie })).status, 200);
+    assert.equal((await call('/dashboard/hsd/summary?from=2026-09-01&to=2026-09-02', { cookie })).status, 200);
+    // The report composer belongs to the coordinators who write the reports, not to whoever
+    // administers Drive and the people list.
+    assert.equal((await call('/email/scheduled', { cookie })).status, 403);
+  });
+
+  test('an admin who does write reports can be ticked for Email', async () => {
+    await addMember({ email: 'writingadmin@salasartechno.com', role: 'admin', sections: ['email'] });
+    assert.equal((await call('/email/scheduled', { cookie: cookieFor('writingadmin@salasartechno.com') })).status, 200);
+  });
+
+  test('ADMIN_EMAILS admins get every section except Email', async () => {
+    const cookie = cookieFor('admin@salasartechno.com');
+    assert.equal((await call('/dashboard/hsd/summary?from=2026-09-01&to=2026-09-02', { cookie })).status, 200);
+    assert.equal((await call('/users', { cookie })).status, 200);
+    assert.equal((await call('/email/scheduled', { cookie })).status, 403);
+  });
+
+  test('EMAIL_USER keeps Email whatever else is true of them', async () => {
+    await addMember({ email: 'pc.hsd@salasartechno.com', role: 'manager', sections: [] });
+    assert.equal((await call('/email/scheduled', { cookie: cookieFor('pc.hsd@salasartechno.com') })).status, 200);
   });
 
   test('ADMIN_EMAILS wins and cannot be edited away from here', async () => {

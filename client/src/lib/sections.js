@@ -7,9 +7,11 @@ export const SECTION_LABELS = {
   settings: 'Settings',
 };
 
+// Sections are the whole answer, for admins too: an admin is not given Email by default (see
+// ADMIN_SECTIONS on the server), so a role shortcut here would draw a nav link the API refuses.
 export function canOpen(user, section) {
   if (!user) return false;
-  return user.role === 'admin' || (user.sections ?? []).includes(section);
+  return (user.sections ?? []).includes(section);
 }
 
 // Where to send somebody who lands on a page they may not open. A process coordinator with only

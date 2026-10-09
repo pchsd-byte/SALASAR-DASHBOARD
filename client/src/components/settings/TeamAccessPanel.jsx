@@ -83,10 +83,15 @@ export function TeamAccessPanel() {
   }
 
   const sections = team?.sections ?? [];
+  // The sections an admin gets whatever is ticked — everything but Email, which belongs to
+  // whoever actually writes the reports. Those boxes show as ticked and are not editable; Email
+  // stays a choice, for an admin who sends reports too.
+  const adminSections = team?.adminSections ?? [];
+  const impliedForAdmin = (role, key) => role === 'admin' && adminSections.includes(key);
   const busy = addMutation.isPending || updateMutation.isPending || removeMutation.isPending;
 
   return (
-    <div className="mt-4 rounded-2xl border p-5" style={{ background: 'var(--surface-1)' }}>
+    <div className="rounded-2xl border p-5" style={{ background: 'var(--surface-1)' }}>
       <div className="mb-1 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
         People and access
       </div>
@@ -153,8 +158,8 @@ export function TeamAccessPanel() {
               <label key={section.key} className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-secondary)' }} title={section.label}>
                 <input
                   type="checkbox"
-                  checked={draft.role === 'admin' || draft.sections.includes(section.key)}
-                  disabled={draft.role === 'admin'}
+                  checked={impliedForAdmin(draft.role, section.key) || draft.sections.includes(section.key)}
+                  disabled={impliedForAdmin(draft.role, section.key)}
                   onChange={() => toggleDraftSection(section.key)}
                   className={FOCUS_RING}
                 />
@@ -249,7 +254,7 @@ export function TeamAccessPanel() {
                         <input
                           type="checkbox"
                           checked={member.sections.includes(section.key)}
-                          disabled={member.role === 'admin' || busy}
+                          disabled={impliedForAdmin(member.role, section.key) || busy}
                           onChange={() => toggleMemberSection(member, section.key)}
                           className={FOCUS_RING}
                         />
@@ -257,7 +262,9 @@ export function TeamAccessPanel() {
                       </label>
                     ))}
                     {member.role === 'admin' && (
-                      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Admins get every section.</span>
+                      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                        Admins get the dashboard and settings automatically — tick Email only if they write reports too.
+                      </span>
                     )}
                   </div>
                 </div>

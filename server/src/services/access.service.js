@@ -15,6 +15,13 @@ import { TeamMember } from '../models/TeamMember.js';
 
 export const SECTIONS = ['dashboard', 'email', 'settings'];
 
+// What an admin gets without anybody ticking anything. Email is deliberately **not** in here:
+// the report composer belongs to the process coordinators who write the reports, and an admin
+// managing Drive and the people list has no business in their drafts and schedule queue. An
+// admin who does need it is ticked for it like anyone else — and EMAIL_USER always keeps it,
+// since that is the mailbox everything is sent from.
+export const ADMIN_SECTIONS = SECTIONS.filter((section) => section !== 'email');
+
 // Shown in the admin UI, so the person granting access reads what it means rather than a key.
 export const SECTION_LABELS = {
   dashboard: 'Dashboard — production, dispatch and manpower figures',
@@ -50,7 +57,9 @@ async function resolve(email) {
   // the database also means an admin can still sign in and read the sync log when MongoDB is the
   // thing that is broken.
   if (isEnvAdmin) {
-    return { allowed: true, role: 'admin', sections: [...SECTIONS], source: 'env' };
+    const sections = [...ADMIN_SECTIONS];
+    if (isEmailSender) sections.push('email');
+    return { allowed: true, role: 'admin', sections, source: 'env' };
   }
 
   const member = await TeamMember.findOne({ email: normalized }).lean();
@@ -62,8 +71,9 @@ async function resolve(email) {
   if (member) {
     const role = member.role === 'admin' ? 'admin' : 'manager';
     const title = member.title ?? null;
+    // An admin's own ticks only decide Email; the rest of an admin's sections are implied.
     const sections = role === 'admin'
-      ? [...SECTIONS]
+      ? SECTIONS.filter((s) => ADMIN_SECTIONS.includes(s) || (member.sections ?? []).includes(s))
       : SECTIONS.filter((s) => (member.sections ?? []).includes(s));
     // EMAIL_USER keeps the Email page even if nobody ticked it: that address is the mailbox the
     // reports are sent from, and losing its own access would be a confusing way to break
@@ -96,6 +106,9 @@ export async function resolveAccess(email) {
   return value;
 }
 
+// Sections are the whole answer — there is no "admin sees everything" shortcut here, because
+// Email is a section an admin does not get by default (ADMIN_SECTIONS above). Being an admin is
+// still what `requireAdmin` checks for Drive, manual syncs and the people list.
 export function canUseSection(access, section) {
-  return Boolean(access?.allowed) && (access.role === 'admin' || access.sections.includes(section));
+  return Boolean(access?.allowed) && access.sections.includes(section);
 }

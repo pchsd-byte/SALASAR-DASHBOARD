@@ -1,7 +1,7 @@
 import { TeamMember } from '../models/TeamMember.js';
 import { User } from '../models/User.js';
 import { env } from '../config/env.js';
-import { SECTIONS, SECTION_LABELS, DEFAULT_SECTIONS, invalidateAccessCache } from '../services/access.service.js';
+import { SECTIONS, ADMIN_SECTIONS, SECTION_LABELS, DEFAULT_SECTIONS, invalidateAccessCache } from '../services/access.service.js';
 import { BadRequestError } from './dashboard.controller.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -13,7 +13,10 @@ const shape = (m) => ({
   name: m.name ?? null,
   title: m.title ?? null,
   role: m.role,
-  sections: m.role === 'admin' ? SECTIONS : m.sections ?? [],
+  // Mirrors resolveAccess: an admin's implied sections, plus Email only if it was ticked.
+  sections: m.role === 'admin'
+    ? SECTIONS.filter((s) => ADMIN_SECTIONS.includes(s) || (m.sections ?? []).includes(s))
+    : m.sections ?? [],
   active: m.active !== false,
 });
 
@@ -71,6 +74,9 @@ export async function listTeam(req, res) {
     // What the UI needs to render the section checkboxes without hard-coding the list.
     sections: SECTIONS.map((key) => ({ key, label: SECTION_LABELS[key] })),
     defaultSections: DEFAULT_SECTIONS,
+    // Which boxes an admin gets whatever is ticked, so the UI can show them as implied rather
+    // than guessing the rule a second time. Email is not among them.
+    adminSections: ADMIN_SECTIONS,
     // Config-level facts the admin cannot change from here, shown so the page explains itself.
     envAdmins: env.adminEmails,
     emailSender: env.emailUser,

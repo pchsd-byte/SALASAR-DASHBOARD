@@ -71,7 +71,7 @@ The daily report that gets shared on WhatsApp and email is a stack of spreadshee
 Then **Copy image** (straight into an email or WhatsApp) or **Download PNG**. Nothing is uploaded; it all happens in the browser.
 
 ### People and access
-Admins add colleagues by work email from **Settings → People and access**, give them a job title ("Process Coordinator — Unit 2"), an access level (admin or manager) and tick the sections they may open. Access applies on their next page load — no sign-out needed — and can be revoked without deleting the record.
+Admins add colleagues by work email from **Settings → People and access** — the first tab on the page — give them a job title ("Process Coordinator — Unit 2"), an access level (admin or manager) and tick the sections they may open. Access applies on their next page load — no sign-out needed — and can be revoked without deleting the record.
 
 ### Sync status
 A badge on every page shows when the data last came from Drive, how many rows were written, and how many issues the run reported. Opening it lists what the sync found, including the spreadsheet's own data problems.
@@ -155,7 +155,7 @@ Access is resolved in one place and enforced on **every request** — the UI onl
 | Access level | What it means |
 |---|---|
 | **Manager** | Exactly the sections ticked for them |
-| **Admin** | Every section, plus People and access, Drive connect/disconnect and manual sync |
+| **Admin** | Dashboard and Settings, plus People and access, Drive connect/disconnect and manual sync — **not Email**, unless ticked |
 
 Two rules protect the setup:
 
@@ -164,7 +164,7 @@ Two rules protect the setup:
 
 Anyone at a domain in `ALLOWED_LOGIN_DOMAINS` who is not on the list can sign in and read the dashboard, as before. To make the list the only rule, clear that variable.
 
-**Email is a section, not a person.** Several process coordinators can compose and send; what stays with `EMAIL_USER` is the Gmail authorisation — every report leaves from that one mailbox whoever wrote it.
+**Email is a section, not a person.** Several process coordinators can compose and send; what stays with `EMAIL_USER` is the Gmail authorisation — every report leaves from that one mailbox whoever wrote it. Admins are not given Email automatically: the composer and its send queue belong to the people who write the reports. Tick it for an admin who writes them too.
 
 ## Tech stack
 
