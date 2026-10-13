@@ -67,11 +67,11 @@ export const env = {
 
   adminEmails: list(process.env.ADMIN_EMAILS),
 
-  // Who may sign in at all. Before this, any Google account on the internet could sign in and
-  // read every figure (SECURITY_REPORT SEC-01). Allowed: any verified address at one of these
-  // domains, any address listed in ALLOWED_LOGIN_EMAILS, and every admin and the email sender.
-  // ALLOWED_LOGIN_DOMAINS=* restores the old open behaviour, deliberately and visibly.
-  allowedLoginDomains: list(process.env.ALLOWED_LOGIN_DOMAINS ?? 'salasartechno.com'),
+  // Addresses the operator grants straight from the environment, as an alternative to the
+  // people list in Settings. ALLOWED_LOGIN_DOMAINS was removed (Oct 2026): a whole domain is
+  // not a permission anybody granted, and the plant wanted every single account named. Access
+  // is now ADMIN_EMAILS + EMAIL_USER + this list + whoever an admin has added
+  // (services/access.service.js).
   allowedLoginEmails: list(process.env.ALLOWED_LOGIN_EMAILS),
 
   // Compared character for character with the browser's Origin header (CORS, CSRF check,
@@ -104,13 +104,13 @@ export const env = {
 
 // One rule, used at sign-in and again on every request, so narrowing the list also ends
 // sessions that were issued before the change.
+// Named in the environment itself. This is no longer the whole answer to "may they sign in?" —
+// services/access.service.js is, and it also consults the people list an admin maintains.
 export function isAllowedLogin(email) {
   const normalized = (email || '').toLowerCase();
   if (!normalized) return false;
   if (env.adminEmails.includes(normalized) || normalized === env.emailUser?.toLowerCase()) return true;
-  if (env.allowedLoginEmails.includes(normalized)) return true;
-  if (env.allowedLoginDomains.includes('*')) return true;
-  return env.allowedLoginDomains.includes(normalized.split('@')[1]);
+  return env.allowedLoginEmails.includes(normalized);
 }
 
 export function roleFor(email) {

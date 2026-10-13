@@ -13,7 +13,7 @@ process.env.JWT_SECRET = 'test-jwt-secret';
 process.env.TOKEN_ENCRYPTION_KEY = 'test-token-encryption-key';
 process.env.ADMIN_EMAILS = 'admin@salasartechno.com,owner@gmail.com';
 process.env.EMAIL_USER = 'pc.hsd@salasartechno.com';
-process.env.ALLOWED_LOGIN_DOMAINS = 'salasartechno.com';
+// ALLOWED_LOGIN_DOMAINS is gone: a domain is no longer a way in (Oct 2026).
 process.env.ALLOWED_LOGIN_EMAILS = 'guest@gmail.com';
 process.env.CLIENT_ORIGIN = 'http://localhost:5173/';
 // Pinned for the same reason as MONGODB_URI above: whoever runs the tests may have a deployed

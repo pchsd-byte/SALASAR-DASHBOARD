@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listTeam, addTeamMember, updateTeamMember, removeTeamMember } from '../controllers/user.controller.js';
+import { listTeam, addTeamMember, updateTeamMember, removeTeamMember, dismissAccessRequest } from '../controllers/user.controller.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
@@ -11,6 +11,8 @@ const router = Router();
 router.use(requireAuth, requireAdmin);
 
 router.get('/', asyncHandler(listTeam));
+// Two segments, so it can never be mistaken for the one-segment /:email routes below.
+router.delete('/requests/:email', asyncHandler(dismissAccessRequest));
 router.post('/', asyncHandler(addTeamMember));
 router.patch('/:email', asyncHandler(updateTeamMember));
 router.delete('/:email', asyncHandler(removeTeamMember));

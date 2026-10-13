@@ -91,6 +91,12 @@ export async function updateTeamMember(email, changes) {
   return data;
 }
 
+// Clears a refused sign-in attempt from the admin's queue without granting anything.
+export async function dismissAccessRequest(email) {
+  const { data } = await api.delete(`/users/requests/${encodeURIComponent(email)}`);
+  return data;
+}
+
 export async function removeTeamMember(email) {
   const { data } = await api.delete(`/users/${encodeURIComponent(email)}`);
   return data;

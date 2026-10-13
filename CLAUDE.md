@@ -247,7 +247,8 @@ All under `/api`. Every route except `/health`, `/health/deep`, `/auth/google*`,
 | `/` | authenticated | Dashboard — **Overview** / **Dispatch Synopsis** toggle. |
 | `/settings` | `section="settings"` | Two tabs for an admin — **People and access** (opens first; it is what they come here for) and **Google Drive sync**. A manager with only the section sees the Drive card alone. Returning from a Drive connection (`?driveConnect=`) opens the Drive tab. (There is no targets UI — `TargetPanel.jsx` is not rendered anywhere.) |
 | `/email` | `section="email"` | Report composer + scheduler. |
-| `/no-access` | authenticated | For somebody allowed to sign in who has no section yet. |
+| `/access-denied` | **public** | Where a refused sign-in lands — `?email=&reason=not_allowed\|revoked`. No session exists, so the address comes in the URL. |
+| `/no-access` | authenticated | On the list, signed in, but no section ticked yet — same page, `variant="no_sections"`. |
 
 Routes and nav links are driven by the sections on `/auth/me` (`client/src/lib/sections.js`). **That gating is cosmetic: the server re-checks every request** with `requireSection(...)` — a manager without the `dashboard` section is refused the figures themselves, not merely the link. The old `PC_HSD_EMAIL` constant is gone; the Email page's "From" line now comes from `/auth/me`'s `emailSender`.
 
@@ -279,7 +280,7 @@ Not one grant with merged scopes. Three, with different lifetimes and different 
 
 Each has its own redirect URI env var. Refresh tokens are encrypted at rest by `utils/crypto.js` (AES-256-GCM, key derived by SHA-256 of `TOKEN_ENCRYPTION_KEY`, stored as `iv:authTag:ciphertext` hex).
 
-All three flows carry an OAuth `state` (random value in a 10-minute `oauth_state` cookie, checked on the callback). Login also requires `email_verified` and an **allowed account**: a domain in `ALLOWED_LOGIN_DOMAINS` (default `salasartechno.com`), an address in `ALLOWED_LOGIN_EMAILS`, an admin, or `EMAIL_USER` (`config/env.js` `isAllowedLogin`). Until Sep 2026 any Google account could sign in and read everything.
+All three flows carry an OAuth `state` (random value in a 10-minute `oauth_state` cookie, checked on the callback). Login also requires `email_verified` and an **allowed account** — and since Oct 2026 that means **named**: `ADMIN_EMAILS`, `EMAIL_USER`, `ALLOWED_LOGIN_EMAILS`, or a row an admin added (§6.5). `ALLOWED_LOGIN_DOMAINS` is gone: admitting a whole domain was a permission nobody granted. A refused sign-in records an `AccessRequest` and redirects to `/access-denied?email=…&reason=not_allowed|revoked` — not back to `/login` with an error code, which read as "sign-in failed" and sent people round the loop again.
 
 ### 6.5 People and access — `services/access.service.js`
 
@@ -289,10 +290,11 @@ Sections are `dashboard`, `email`, `settings`. An **admin** gets `ADMIN_SECTIONS
 
 Two sources, in this order:
 
+0. **Nobody unnamed.** There is no domain rule. Any Google account — personal or a colleague's work address — is refused until it appears somewhere below, and the attempt is recorded in `AccessRequest` for the admin's queue (90-day TTL, one row per address, repeat attempts increment `attempts`). Granting or dismissing clears it; so does a successful sign-in.
 1. **The environment.** `ADMIN_EMAILS` is checked **first and without a database query**: those addresses are always admins, which is both the lock-out guard (the people list cannot leave the app with no admin) and the reason an admin can still sign in when MongoDB is the thing that is down. They cannot be edited through the API — it answers 400 naming `ADMIN_EMAILS`.
 2. **`TeamMember`** — what an admin maintains at Settings → People and access. Keyed by **email, not User**: access is granted before that person has ever signed in, so there is no user document yet. `active: false` revokes someone the login domain would otherwise admit.
 
-Anyone else allowed by `ALLOWED_LOGIN_DOMAINS` / `ALLOWED_LOGIN_EMAILS` and not listed gets `DEFAULT_SECTIONS` (`dashboard`) — the behaviour before this existed, so an upgrade does not lock the plant out of its own figures.
+An address in `ALLOWED_LOGIN_EMAILS` but not on the list gets `DEFAULT_SECTIONS` (`dashboard`).
 
 Resolution is cached in memory for 30 s per address, and every write through `/api/users` clears that address, so a change an admin makes applies on the person's next request without them signing out.
 
@@ -505,8 +507,7 @@ For Nov 2025 (both L&T MHI and RIL) and several RIL months, the sheet's own mont
 | `GOOGLE_LOGIN_REDIRECT_URI` · `GOOGLE_DRIVE_REDIRECT_URI` · `GMAIL_SEND_REDIRECT_URI` | Default to localhost. |
 | `JWT_SECRET` · `TOKEN_ENCRYPTION_KEY` | Dev fallbacks exist for local use only — a deployed server refuses to start on them. |
 | `ADMIN_EMAILS` | Comma-separated. Always admins, checked before any database query, and not editable from the UI — the lock-out guard (§6.5). |
-| `ALLOWED_LOGIN_DOMAINS` | Default `salasartechno.com`. `*` = any Google account. |
-| `ALLOWED_LOGIN_EMAILS` | Comma-separated exceptions (e.g. staff on personal Gmail). |
+| `ALLOWED_LOGIN_EMAILS` | Comma-separated addresses granted straight from the environment (e.g. staff on personal Gmail). Everyone else must be added in Settings. |
 | `CLIENT_ORIGIN` | CORS origin, CSRF origin check **and** post-login redirect target. Trailing slash is stripped. |
 | `HSD_SPREADSHEET_ID` | Live workbook. |
 | `SYNOPSIS_FOLDER_ID` | Monthly synopsis folder. Defaults to the production folder. |

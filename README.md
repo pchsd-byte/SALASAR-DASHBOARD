@@ -162,7 +162,7 @@ Two rules protect the setup:
 - **`ADMIN_EMAILS` always wins**, is checked before any database query, and cannot be edited from the UI. It is the way back in if the people list is ever emptied — and it means an admin can still sign in when MongoDB is the thing that is broken.
 - **The last admin cannot be demoted, switched off or removed.**
 
-Anyone at a domain in `ALLOWED_LOGIN_DOMAINS` who is not on the list can sign in and read the dashboard, as before. To make the list the only rule, clear that variable.
+**Nobody gets in unnamed.** There is no domain rule: any Google account — a personal address or a colleague's work address — is refused until an admin adds it. A refused sign-in lands on a page explaining that access is granted by name, and is recorded as a request the admin can grant or dismiss from **Waiting for access** at the top of the people list.
 
 **Email is a section, not a person.** Several process coordinators can compose and send; what stays with `EMAIL_USER` is the Gmail authorisation — every report leaves from that one mailbox whoever wrote it. Admins are not given Email automatically: the composer and its send queue belong to the people who write the reports. Tick it for an admin who writes them too.
 
@@ -274,8 +274,7 @@ Set in `server/.env` (see `server/.env.example`). The server refuses to boot if 
 | `GOOGLE_LOGIN_REDIRECT_URI`<br>`GOOGLE_DRIVE_REDIRECT_URI`<br>`GMAIL_SEND_REDIRECT_URI` | Default to localhost. On Render, an unset or localhost value is derived from the service's own URL. Each must also be listed on the Google OAuth client. |
 | `JWT_SECRET` · `TOKEN_ENCRYPTION_KEY` | Development fallbacks exist for local use only — a deployed server refuses to start on them. |
 | `ADMIN_EMAILS` | Comma-separated. Always admins; the lock-out guard. |
-| `ALLOWED_LOGIN_DOMAINS` | Default `salasartechno.com`. `*` allows any Google account; empty makes the people list the only rule. |
-| `ALLOWED_LOGIN_EMAILS` | Comma-separated exceptions (staff on personal addresses). |
+| `ALLOWED_LOGIN_EMAILS` | Comma-separated addresses granted from the environment (staff on personal addresses). Everyone else is added in Settings. |
 | `CLIENT_ORIGIN` | CORS origin, CSRF origin check **and** post-login redirect target. No trailing slash. |
 | `HSD_SPREADSHEET_ID` | The live workbook. |
 | `SYNOPSIS_FOLDER_ID` | Folder of monthly synopsis workbooks. |

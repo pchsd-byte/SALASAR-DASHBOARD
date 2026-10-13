@@ -1,17 +1,23 @@
-import { env, isAllowedLogin as envAllowsLogin, roleFor as envRoleFor } from '../config/env.js';
+import { env, roleFor as envRoleFor } from '../config/env.js';
 import { TeamMember } from '../models/TeamMember.js';
 
 // The one answer to "what may this address do?", used at sign-in and again on every request.
 //
-// Two sources, in this order:
-//   1. The environment — ADMIN_EMAILS, EMAIL_USER, ALLOWED_LOGIN_DOMAINS, ALLOWED_LOGIN_EMAILS.
-//      Unchanged from before, and still the way back in: an address in ADMIN_EMAILS is an admin
-//      no matter what the database says, which is what makes it impossible to lock every admin
-//      out of the app by editing the people list.
-//   2. The TeamMember collection — what an admin maintains from Settings.
+// **Nobody gets in who has not been named.** There is no longer a domain rule: signing in with
+// any Google account — a personal gmail.com address or a colleague's work address — gives you
+// nothing until an admin adds you. ALLOWED_LOGIN_DOMAINS used to admit the whole company and is
+// gone; the plant is a handful of people, and "anyone at the domain can read the figures" was a
+// wider door than anybody had actually asked for.
 //
-// A deactivated TeamMember row revokes a domain sign-in that would otherwise be allowed: that is
-// the only way to turn someone off without narrowing the whole domain.
+// So an address is allowed only if it is one of:
+//   1. **ADMIN_EMAILS** — always admins, checked before any query. The way back in, and the
+//      reason the people list can never lock every admin out.
+//   2. **An active TeamMember row** — what an admin maintains from Settings.
+//   3. **EMAIL_USER / ALLOWED_LOGIN_EMAILS** — explicit grants typed into the environment by
+//      whoever runs the server, which is the same act of permission as adding a row.
+//
+// Everything else is refused, and the attempt is recorded so an admin can see who knocked
+// (models/AccessRequest.js).
 
 export const SECTIONS = ['dashboard', 'email', 'settings'];
 
@@ -82,12 +88,12 @@ async function resolve(email) {
     return { allowed: true, role, title, sections, source: 'member' };
   }
 
-  // Nobody has listed them, so fall back to the environment's own rule.
+  // Not on the list: the only remaining ways in are the explicit grants in the environment.
   if (isEmailSender) {
     return { allowed: true, role: envRoleFor(normalized), sections: [...DEFAULT_SECTIONS, 'email'], source: 'env' };
   }
-  if (envAllowsLogin(normalized)) {
-    return { allowed: true, role: envRoleFor(normalized), sections: [...DEFAULT_SECTIONS], source: 'domain' };
+  if (env.allowedLoginEmails.includes(normalized)) {
+    return { allowed: true, role: envRoleFor(normalized), sections: [...DEFAULT_SECTIONS], source: 'env-email' };
   }
   return { allowed: false, role: 'manager', sections: [], source: 'none' };
 }

@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { app } from '../src/app.js';
 import { env, isAllowedLogin, roleFor } from '../src/config/env.js';
 import { TeamMember } from '../src/models/TeamMember.js';
+import { AccessRequest } from '../src/models/AccessRequest.js';
 import { User } from '../src/models/User.js';
 import { invalidateAccessCache } from '../src/services/access.service.js';
 import { parseDateRange } from '../src/controllers/dashboard.controller.js';
@@ -55,10 +56,12 @@ describe('configuration', () => {
   });
 
   // SEC-01
-  test('sign-in is limited to the company domain, listed guests, admins and the email sender', () => {
-    assert.equal(isAllowedLogin('someone@salasartechno.com'), true);
+  // Every address is named now — there is no domain rule left to admit a colleague nobody added.
+  test('the environment admits only the addresses it names', () => {
     assert.equal(isAllowedLogin('owner@gmail.com'), true, 'an admin on a personal address');
     assert.equal(isAllowedLogin('guest@gmail.com'), true, 'listed in ALLOWED_LOGIN_EMAILS');
+    assert.equal(isAllowedLogin('pc.hsd@salasartechno.com'), true, 'the mailbox reports are sent from');
+    assert.equal(isAllowedLogin('someone@salasartechno.com'), false, 'a work address nobody has added');
     assert.equal(isAllowedLogin('stranger@gmail.com'), false);
     assert.equal(isAllowedLogin('x@salasartechno.com.evil.com'), false);
   });
@@ -140,7 +143,9 @@ describe('request hardening', () => {
 
   // REL-01: the error reaches the error handler as a 400 and the process keeps serving.
   test('an invalid date is a 400, and the server is still up afterwards', async () => {
-    const cookie = cookieFor('someone@salasartechno.com');
+    // An account that actually has the dashboard — an un-added address is refused at the door
+    // now, long before anything looks at the query string.
+    const cookie = cookieFor('admin@salasartechno.com');
     for (const q of ['from=garbage', 'from=2026-02-30', 'from=2026-03-02&to=2026-03-01', 'businessUnit=XYZ']) {
       const res = await call(`/dashboard/hsd/summary?${q}`, { cookie });
       assert.equal(res.status, 400, q);
@@ -256,7 +261,7 @@ describe('people and access', () => {
     assert.equal((await call('/dashboard/hsd/summary?from=2026-09-01&to=2026-09-02', { cookie })).status, 200);
   });
 
-  test('switching someone off blocks them even though the domain would let them in', async () => {
+  test('switching someone off blocks them', async () => {
     await addMember({ email: 'leaver@salasartechno.com', sections: ['dashboard'], active: false });
     const res = await call('/dashboard/hsd/summary', { cookie: cookieFor('leaver@salasartechno.com') });
     assert.equal(res.status, 403);
@@ -323,8 +328,9 @@ describe('people and access', () => {
     assert.equal((await call('/email/scheduled', { cookie: cookieFor('gone@salasartechno.com') })).status, 200);
 
     assert.equal((await call('/users/gone@salasartechno.com', { method: 'DELETE', cookie: admin() })).status, 200);
-    // They fall back to the domain rule: still able to sign in, but only the default section.
+    // Removed means removed: not a lesser section, no access to anything at all.
     assert.equal((await call('/email/scheduled', { cookie: cookieFor('gone@salasartechno.com') })).status, 403);
+    assert.equal((await call('/dashboard/hsd/summary', { cookie: cookieFor('gone@salasartechno.com') })).status, 403);
   });
 
   test('/auth/me reports the sections and designation the UI draws itself from', async () => {
@@ -336,5 +342,80 @@ describe('people and access', () => {
     assert.equal(me.title, 'Process Coordinator — Fab');
     assert.equal(me.role, 'manager');
     assert.equal(me.emailSender, 'pc.hsd@salasartechno.com', 'the From line comes from the server, not a hard-coded constant');
+  });
+});
+
+// --- the closed door --------------------------------------------------------------------------
+// Signing in with Google proves who you are; it grants nothing here. Only ADMIN_EMAILS, the
+// explicit environment grants, and the people an admin has added get past this.
+
+describe('nobody gets in unnamed', () => {
+  const admin = () => cookieFor('admin@salasartechno.com');
+
+  test('a personal Google account with a valid session reaches nothing', async () => {
+    const cookie = cookieFor('someone.random@gmail.com');
+    for (const path of ['/dashboard/hsd/summary', '/dashboard/synopsis', '/email/scheduled', '/sync/status', '/users', '/targets']) {
+      assert.equal((await call(path, { cookie })).status, 403, path);
+    }
+  });
+
+  test('a work address nobody has added is refused too — there is no domain rule left', async () => {
+    const cookie = cookieFor('newjoiner@salasartechno.com');
+    assert.equal((await call('/dashboard/hsd/summary', { cookie })).status, 403);
+    assert.equal((await call('/sync/status', { cookie })).status, 403);
+  });
+
+  test('the same address works the moment an admin adds it', async () => {
+    const cookie = cookieFor('newjoiner@salasartechno.com');
+    assert.equal((await call('/dashboard/hsd/summary?from=2026-09-01&to=2026-09-02', { cookie })).status, 403);
+
+    await call('/users', { method: 'POST', cookie: admin(), body: { email: 'newjoiner@salasartechno.com', sections: ['dashboard'] } });
+    assert.equal((await call('/dashboard/hsd/summary?from=2026-09-01&to=2026-09-02', { cookie })).status, 200);
+  });
+
+  test('a refused sign-in becomes a request the admin can see and grant', async () => {
+    // What the login callback records when Google hands back an address nobody has added.
+    await AccessRequest.create({ email: 'knocking@gmail.com', name: 'Someone Knocking', attempts: 2, reason: 'not_allowed' });
+
+    const list = await (await call('/users', { cookie: admin() })).json();
+    assert.equal(list.requests.length, 1);
+    assert.deepEqual(
+      { email: list.requests[0].email, name: list.requests[0].name, attempts: list.requests[0].attempts },
+      { email: 'knocking@gmail.com', name: 'Someone Knocking', attempts: 2 },
+    );
+
+    // Granting it is just adding them — and that clears the request.
+    await call('/users', { method: 'POST', cookie: admin(), body: { email: 'knocking@gmail.com', sections: ['dashboard'] } });
+    const after = await (await call('/users', { cookie: admin() })).json();
+    assert.deepEqual(after.requests, [], 'no longer waiting');
+    assert.ok(after.members.some((m) => m.email === 'knocking@gmail.com'), 'on the list instead');
+    assert.equal(await AccessRequest.countDocuments({ email: 'knocking@gmail.com' }), 0);
+  });
+
+  test('a request can be dismissed without granting anything', async () => {
+    await AccessRequest.create({ email: 'stranger@gmail.com', attempts: 1 });
+    assert.equal((await call('/users/requests/stranger@gmail.com', { method: 'DELETE', cookie: admin() })).status, 200);
+
+    const list = await (await call('/users', { cookie: admin() })).json();
+    assert.deepEqual(list.requests, []);
+    assert.equal((await call('/dashboard/hsd/summary', { cookie: cookieFor('stranger@gmail.com') })).status, 403, 'still refused');
+
+    const again = await call('/users/requests/stranger@gmail.com', { method: 'DELETE', cookie: admin() });
+    assert.equal(again.status, 400, 'and dismissing a request that is not there says so');
+  });
+
+  test('only an admin sees or clears the queue', async () => {
+    await AccessRequest.create({ email: 'knocking@gmail.com', attempts: 1 });
+    await TeamMember.create({ email: 'manager@salasartechno.com', role: 'manager', sections: ['dashboard'], active: true });
+    const cookie = cookieFor('manager@salasartechno.com');
+    assert.equal((await call('/users', { cookie })).status, 403);
+    assert.equal((await call('/users/requests/knocking@gmail.com', { method: 'DELETE', cookie })).status, 403);
+  });
+
+  test('somebody already on the list is not also shown as waiting', async () => {
+    await TeamMember.create({ email: 'both@salasartechno.com', role: 'manager', sections: ['dashboard'], active: true });
+    await AccessRequest.create({ email: 'both@salasartechno.com', attempts: 1 });
+    const list = await (await call('/users', { cookie: admin() })).json();
+    assert.deepEqual(list.requests, []);
   });
 });

@@ -7,7 +7,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Settings } from './pages/Settings';
 import { Email } from './pages/Email';
-import { NoAccess } from './pages/NoAccess';
+import { AccessDenied } from './pages/AccessDenied';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -29,13 +29,15 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            {/* Public: the person has no session — the server turned their sign-in away and
+                passed the address along in the URL. */}
+            <Route path="/access-denied" element={<AccessDenied />} />
+            {/* Signed in, but no section has been ticked for them yet. */}
             <Route
               path="/no-access"
               element={
                 <ProtectedRoute>
-                  <AppShell>
-                    <NoAccess />
-                  </AppShell>
+                  <AccessDenied variant="no_sections" />
                 </ProtectedRoute>
               }
             />

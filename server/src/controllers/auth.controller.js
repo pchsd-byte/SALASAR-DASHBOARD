@@ -11,6 +11,7 @@ import {
 import { env } from '../config/env.js';
 import { User } from '../models/User.js';
 import { TeamMember } from '../models/TeamMember.js';
+import { AccessRequest } from '../models/AccessRequest.js';
 import { resolveAccess } from '../services/access.service.js';
 import { GoogleToken } from '../models/GoogleToken.js';
 import { encryptText } from '../utils/crypto.js';
@@ -103,8 +104,28 @@ export async function handleGoogleLoginCallback(req, res) {
     // granted in Settings → People and access (services/access.service.js).
     const access = await resolveAccess(email);
     if (!access.allowed) {
-      console.warn('[auth] sign-in refused for an account outside the allowed list');
-      return res.redirect(`${env.clientOrigin}/login?error=not_allowed`);
+      // Refused, and told so properly. This used to bounce back to /login carrying an error
+      // code, which reads as "your sign-in failed" — people retried the same account, and the
+      // admin never learned anybody had knocked. The attempt is recorded for the people list,
+      // and they get a page that explains the actual situation.
+      console.warn(`[auth] sign-in refused (${access.source})`);
+      const reason = access.source === 'revoked' ? 'revoked' : 'not_allowed';
+      try {
+        await AccessRequest.findOneAndUpdate(
+          { email },
+          {
+            $set: { name: payload.name || null, picture: payload.picture || null, reason, lastAttemptAt: new Date() },
+            $inc: { attempts: 1 },
+            $setOnInsert: { firstAttemptAt: new Date() },
+          },
+          { upsert: true },
+        );
+      } catch (err) {
+        // Being unable to write the request must not change the answer, which is still "no".
+        console.error('[auth] could not record the access request:', err.message);
+      }
+      const params = new URLSearchParams({ email, reason });
+      return res.redirect(`${env.clientOrigin}/access-denied?${params}`);
     }
 
     const role = access.role;
@@ -126,6 +147,8 @@ export async function handleGoogleLoginCallback(req, res) {
 
     // So the people list can show who has actually used their access, and when.
     await TeamMember.updateOne({ email }, { $set: { lastLoginAt: new Date() } });
+    // They are in: whatever they were refused for is settled.
+    await AccessRequest.deleteOne({ email });
 
     issueSessionCookie(req, res, user);
     res.redirect(env.clientOrigin);

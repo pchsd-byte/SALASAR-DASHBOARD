@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { fetchTeam, addTeamMember, updateTeamMember, removeTeamMember } from '../../lib/api';
+import { fetchTeam, addTeamMember, updateTeamMember, removeTeamMember, dismissAccessRequest } from '../../lib/api';
 
 // Who may sign in and what they may open. The plant has several process coordinators, and until
 // now adding one meant editing the server's environment variables and redeploying.
@@ -61,6 +61,13 @@ export function TeamAccessPanel() {
     onSettled: refresh,
   });
   const removeMutation = useMutation({ mutationFn: removeTeamMember, onSuccess: () => { setError(''); refresh(); }, onError });
+  const dismissMutation = useMutation({ mutationFn: dismissAccessRequest, onSuccess: () => { setError(''); refresh(); }, onError });
+
+  // Granting a request is just adding them, with the dashboard ticked — the usual starting
+  // point. Anything more specific is a tick away once they are on the list.
+  function grantRequest(request) {
+    addMutation.mutate({ email: request.email, name: request.name ?? '', title: '', role: 'manager', sections: team?.defaultSections ?? ['dashboard'] });
+  }
 
   function toggleDraftSection(key) {
     setDraft((d) => ({ ...d, sections: d.sections.includes(key) ? d.sections.filter((s) => s !== key) : [...d.sections, key] }));
@@ -78,17 +85,18 @@ export function TeamAccessPanel() {
   }
 
   function handleRemove(member) {
-    if (!window.confirm(`Remove ${member.email}? They will not be able to sign in unless your login domain still allows them.`)) return;
+    if (!window.confirm(`Remove ${member.email}? They will not be able to sign in at all until somebody adds them again.`)) return;
     removeMutation.mutate(member.email);
   }
 
   const sections = team?.sections ?? [];
+  const requests = team?.requests ?? [];
   // The sections an admin gets whatever is ticked — everything but Email, which belongs to
   // whoever actually writes the reports. Those boxes show as ticked and are not editable; Email
   // stays a choice, for an admin who sends reports too.
   const adminSections = team?.adminSections ?? [];
   const impliedForAdmin = (role, key) => role === 'admin' && adminSections.includes(key);
-  const busy = addMutation.isPending || updateMutation.isPending || removeMutation.isPending;
+  const busy = addMutation.isPending || updateMutation.isPending || removeMutation.isPending || dismissMutation.isPending;
 
   return (
     <div className="rounded-2xl border p-5" style={{ background: 'var(--surface-1)' }}>
@@ -97,9 +105,50 @@ export function TeamAccessPanel() {
       </div>
       <div className="mb-4 text-xs" style={{ color: 'var(--text-muted)' }}>
         Add a colleague's work email and tick the sections they may open. Changes apply the next time
-        they load a page — they do not have to sign out.
-        {team?.loginDomains?.length ? ` Anyone at ${team.loginDomains.join(', ')} can already sign in and see the dashboard; add them here to give them more, or switch them off.` : ''}
+        they load a page — they do not have to sign out. <strong>Nobody can sign in until they are on
+        this list</strong>: any other Google account is turned away, whatever the address.
       </div>
+
+      {requests.length > 0 && (
+        <div className="mb-5 rounded-xl border p-3" style={{ borderColor: 'var(--status-warning)', background: 'color-mix(in srgb, var(--status-warning) 7%, transparent)' }}>
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            <span className="h-2 w-2 rounded-full" style={{ background: 'var(--status-warning)' }} />
+            Waiting for access ({requests.length})
+          </div>
+          <div className="mb-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+            These people signed in and were turned away because nobody had added them.
+          </div>
+          <ul className="space-y-2">
+            {requests.map((request) => (
+              <li key={request.email} className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2" style={{ borderColor: 'var(--baseline)', background: 'var(--surface-1)' }}>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm" style={{ color: 'var(--text-primary)' }}>
+                    {request.name || request.email}
+                    {request.reason === 'revoked' && (
+                      <span className="ml-2 text-[10px] font-semibold uppercase" style={{ color: 'var(--status-critical)' }}>
+                        previously switched off
+                      </span>
+                    )}
+                  </div>
+                  <div className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>
+                    {request.email}
+                    {request.attempts > 1 ? ` · tried ${request.attempts} times` : ''}
+                    {request.lastAttemptAt ? ` · last ${format(new Date(request.lastAttemptAt), 'd MMM, HH:mm')}` : ''}
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <button type="button" disabled={busy} onClick={() => grantRequest(request)} className={`rounded-full px-3 py-1 text-xs font-medium text-white disabled:opacity-50 ${FOCUS_RING}`} style={{ background: 'var(--series-1)' }}>
+                    Give access
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => dismissMutation.mutate(request.email)} className={BUTTON} style={{ color: 'var(--text-secondary)' }}>
+                    Dismiss
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {error && (
         <div role="alert" className="mb-3 text-xs" style={{ color: 'var(--status-critical)' }}>

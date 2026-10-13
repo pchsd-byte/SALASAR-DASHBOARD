@@ -1,4 +1,5 @@
 import { TeamMember } from '../models/TeamMember.js';
+import { AccessRequest } from '../models/AccessRequest.js';
 import { User } from '../models/User.js';
 import { env } from '../config/env.js';
 import { SECTIONS, ADMIN_SECTIONS, SECTION_LABELS, DEFAULT_SECTIONS, invalidateAccessCache } from '../services/access.service.js';
@@ -63,10 +64,13 @@ async function refuseIfLastAdmin(email) {
 }
 
 export async function listTeam(req, res) {
-  const [members, users] = await Promise.all([
+  const [members, users, requests] = await Promise.all([
     TeamMember.find().sort({ email: 1 }).lean(),
     // Whoever has actually signed in, for the name and the last-seen column.
     User.find().select('email name picture lastLoginAt -_id').lean(),
+    // People turned away at sign-in. Shown at the top of the page: the admin's job here is
+    // usually "somebody says they cannot get in", and this answers it without a conversation.
+    AccessRequest.find().sort({ lastAttemptAt: -1 }).limit(50).lean(),
   ]);
   const byEmail = new Map(users.map((u) => [u.email, u]));
 
@@ -80,7 +84,20 @@ export async function listTeam(req, res) {
     // Config-level facts the admin cannot change from here, shown so the page explains itself.
     envAdmins: env.adminEmails,
     emailSender: env.emailUser,
-    loginDomains: env.allowedLoginDomains,
+    // Nobody is admitted by their domain any more — every address is named, here or in the
+    // environment — so the page says so instead of naming domains that no longer grant anything.
+    envAllowedEmails: env.allowedLoginEmails,
+    requests: requests
+      // Anyone added since they knocked is no longer waiting.
+      .filter((r) => !members.some((m) => m.email === r.email) && !env.adminEmails.includes(r.email))
+      .map((r) => ({
+        email: r.email,
+        name: r.name ?? null,
+        picture: r.picture ?? null,
+        attempts: r.attempts ?? 1,
+        reason: r.reason ?? 'not_allowed',
+        lastAttemptAt: r.lastAttemptAt ?? null,
+      })),
     members: members.map((m) => ({
       ...shape(m),
       name: byEmail.get(m.email)?.name ?? m.name ?? null,
@@ -107,6 +124,8 @@ export async function addTeamMember(req, res) {
   }
 
   const member = await TeamMember.create({ email, name, title, role, sections, active: true, addedByEmail: req.user.email });
+  // Adding somebody is the answer to their request, however it reached the admin.
+  await AccessRequest.deleteOne({ email });
   invalidateAccessCache(email);
   res.status(201).json(shape(member));
 }
@@ -143,8 +162,17 @@ export async function removeTeamMember(req, res) {
   if (!removed) throw new BadRequestError(`${email} is not on the list.`);
   invalidateAccessCache(email);
   // The User document (their Google profile, from signing in) is deliberately left alone: it is
-  // a record of who has used the app, and removing access does not undo that history. Without a
-  // TeamMember row they fall back to the environment's own rule — which for an address outside
-  // ALLOWED_LOGIN_DOMAINS means no access at all.
+  // a record of who has used the app, and removing access does not undo that history. Removing
+  // the row is the whole revocation: with no domain rule left, an address nobody has named gets
+  // nothing, and their next sign-in lands on the "no access" page as a fresh request.
   res.json({ removed: removed.email });
+}
+
+// Dismiss a sign-in attempt without granting anything — a stranger, or somebody who should not
+// have tried. They can knock again (which re-records it); this only clears the admin's list.
+export async function dismissAccessRequest(req, res) {
+  const email = parseEmail(req.params.email);
+  const removed = await AccessRequest.findOneAndDelete({ email }).lean();
+  if (!removed) throw new BadRequestError(`There is no pending request from ${email}.`);
+  res.json({ dismissed: removed.email });
 }
