@@ -13,6 +13,11 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // midnight to 05:30 every night.
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
+// Which unit a stored row belongs to, for production and dispatch alike. Rows written before
+// each source learned about Bhilai carry no businessUnit and are HSD, so HSD means "not BU"
+// rather than "equals HSD" (§7.4, and the same for production since Oct 2026).
+const unitMatch = (businessUnit) => (businessUnit === 'BU' ? { businessUnit: 'BU' } : { businessUnit: { $ne: 'BU' } });
+
 export class BadRequestError extends Error {
   constructor(message) {
     super(message);
@@ -126,8 +131,8 @@ async function getManpowerSummary(from, to, businessUnit) {
   };
 }
 
-async function sumFinalCoatIncrement(start, end, client) {
-  const match = { date: { $gte: start, $lte: end }, processStage: 'finalCoat', ...(client ? { client } : {}) };
+async function sumFinalCoatIncrement(start, end, client, businessUnit) {
+  const match = { date: { $gte: start, $lte: end }, processStage: 'finalCoat', ...unitMatch(businessUnit), ...(client ? { client } : {}) };
   const [row] = await ProductionRecord.aggregate([
     { $match: match },
     { $group: { _id: null, total: { $sum: '$dailyIncrementQty' } } },
@@ -137,7 +142,7 @@ async function sumFinalCoatIncrement(start, end, client) {
 
 async function getLatestFinalCoatByClient() {
   const rows = await ProductionRecord.aggregate([
-    { $match: { processStage: 'finalCoat' } },
+    { $match: { processStage: 'finalCoat', ...unitMatch('HSD') } },
     { $sort: { date: -1 } },
     { $group: { _id: '$client', cumulativeQty: { $first: '$cumulativeQty' } } },
   ]);
@@ -155,8 +160,8 @@ async function getLatestFinalCoatByClient() {
 // range that straddles one of those resets, while a straight sum of daily figures does not.
 // Same per-stage totals as byStage, but split out per client too, so a stage's bar can be
 // colored by how much each client contributed to it.
-async function getStageByClient(from, to, client) {
-  const match = { date: { $gte: from, $lte: to }, ...(client ? { client } : {}) };
+async function getStageByClient(from, to, client, businessUnit) {
+  const match = { date: { $gte: from, $lte: to }, ...unitMatch(businessUnit), ...(client ? { client } : {}) };
   const rows = await ProductionRecord.aggregate([
     { $match: match },
     { $group: { _id: { stage: '$processStage', client: '$client' }, total: { $sum: '$dailyIncrementQty' } } },
@@ -173,8 +178,8 @@ async function getStageByClient(from, to, client) {
 
 // Final-coat completions per day, split out per client, for the two-(or three-)line
 // completions trend chart — same reshape pattern as getStageByClient/getDispatchTrendByClient.
-async function getFinalCoatTrendByClient(from, to, client) {
-  const match = { date: { $gte: from, $lte: to }, processStage: 'finalCoat', ...(client ? { client } : {}) };
+async function getFinalCoatTrendByClient(from, to, client, businessUnit) {
+  const match = { date: { $gte: from, $lte: to }, processStage: 'finalCoat', ...unitMatch(businessUnit), ...(client ? { client } : {}) };
   const rows = await ProductionRecord.aggregate([
     { $match: match },
     { $group: { _id: { date: '$date', client: '$client' }, total: { $sum: '$dailyIncrementQty' } } },
@@ -190,8 +195,8 @@ async function getFinalCoatTrendByClient(from, to, client) {
   return [...byDate.values()].sort((a, b) => a.date - b.date);
 }
 
-async function getProductionSummary(from, to, client) {
-  const match = { date: { $gte: from, $lte: to } };
+async function getProductionSummary(from, to, client, businessUnit) {
+  const match = { date: { $gte: from, $lte: to }, ...unitMatch(businessUnit) };
   if (client) match.client = client;
   const { start: todayStart, end: todayEnd } = startEndOfToday();
 
@@ -200,7 +205,7 @@ async function getProductionSummary(from, to, client) {
       { $match: match },
       { $group: { _id: '$processStage', total: { $sum: '$dailyIncrementQty' } } },
     ]),
-    getStageByClient(from, to, client),
+    getStageByClient(from, to, client, businessUnit),
     ProductionRecord.aggregate([
       { $match: { ...match, processStage: 'finalCoat' } },
       { $group: { _id: '$client', total: { $sum: '$dailyIncrementQty' } } },
@@ -211,9 +216,9 @@ async function getProductionSummary(from, to, client) {
       { $group: { _id: '$date', total: { $sum: '$dailyIncrementQty' } } },
       { $sort: { _id: 1 } },
     ]),
-    getFinalCoatTrendByClient(from, to, client),
-    sumFinalCoatIncrement(todayStart, todayEnd, client),
-    sumFinalCoatIncrement(from, to, client),
+    getFinalCoatTrendByClient(from, to, client, businessUnit),
+    sumFinalCoatIncrement(todayStart, todayEnd, client, businessUnit),
+    sumFinalCoatIncrement(from, to, client, businessUnit),
   ]);
 
   return {
@@ -226,11 +231,6 @@ async function getProductionSummary(from, to, client) {
     trendByClient,
   };
 }
-
-// Bhilai's blocks sit inside the same "Daily Dispatch" tab and are tagged by the parser from
-// their own titles. Records synced before that tag existed have no businessUnit and were all
-// HSD-titled or unlabelled, so "not BU" is what HSD means.
-const unitMatch = (businessUnit) => (businessUnit === 'BU' ? { businessUnit: 'BU' } : { businessUnit: { $ne: 'BU' } });
 
 async function sumDispatchQty(start, end, client, businessUnit) {
   const match = { date: { $gte: start, $lte: end }, ...unitMatch(businessUnit), ...(client ? { client } : {}) };
@@ -316,28 +316,18 @@ async function getTargetProgress() {
   });
 }
 
-const UNAVAILABLE_PRODUCTION = {
-  available: false,
-  completedToday: null,
-  completedInRange: null,
-  byStage: [],
-  byStageByClient: [],
-  byClient: [],
-  trend: [],
-  trendByClient: [],
-};
-
-// Production (Adani/L&T MHI/RIL progress tabs) is an HSD-only source today. Bhilai has no
-// production-progress source connected yet and gets an explicit "unavailable" shape rather than
-// empty/zeroed data, so the UI can say so plainly. Dispatch is available for both: the Daily
-// Dispatch tab carries Bhilai's own blocks (AMNS, Utility Bridge), which used to be summed into
-// HSD's figures.
+// Both units now have all three sources. Bhilai's production comes from its own three progress
+// tabs (sync.service.js PROGRESS_TABS), read exactly as HSD's are; its dispatch comes from the
+// Bhilai blocks interleaved in the Daily Dispatch tab (§7.4). Until Oct 2026 production was an
+// HSD-only source and Bhilai was handed an explicit "unavailable" shape instead.
+//
+// Targets stay HSD-only: they are set per HSD client and nobody has set one for Bhilai.
 export async function buildHsdSummaryData(from, to, businessUnit, client) {
   const isBhilai = businessUnit === 'BU';
 
   const [manpower, production, dispatch, targets] = await Promise.all([
     getManpowerSummary(from, to, businessUnit),
-    isBhilai ? UNAVAILABLE_PRODUCTION : getProductionSummary(from, to, client),
+    getProductionSummary(from, to, client, businessUnit),
     getDispatchSummary(from, to, client, businessUnit),
     isBhilai ? [] : getTargetProgress(),
   ]);
@@ -345,7 +335,7 @@ export async function buildHsdSummaryData(from, to, businessUnit, client) {
   return {
     range: { from, to },
     manpower: roundDeep(manpower),
-    production: isBhilai ? production : { available: true, ...roundDeep(production) },
+    production: { available: true, ...roundDeep(production) },
     dispatch: { available: true, ...roundDeep(dispatch) },
     targets: roundDeep(targets),
   };

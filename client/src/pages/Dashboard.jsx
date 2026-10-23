@@ -94,6 +94,9 @@ export function Dashboard() {
     queryClient.invalidateQueries({ queryKey: ['hsd-insights'] });
   }, [queryClient]);
 
+  // Both plants have production now — Bhilai reads its own three progress tabs. The flag stays
+  // because the payload still carries it, and a unit without a source would say so here rather
+  // than drawing empty charts.
   const productionAvailable = summary?.production?.available ?? false;
   const dispatchAvailable = summary?.dispatch?.available ?? false;
   const isSynopsis = view === 'synopsis';
@@ -196,12 +199,6 @@ export function Dashboard() {
               />
             )}
           </motion.div>
-
-          {summary && !productionAvailable && (
-            <div className="mb-6 rounded-xl border px-4 py-3 text-sm" style={{ color: 'var(--text-muted)', background: 'var(--surface-1)' }}>
-              Production tracking for Bhilai isn't connected to a data source yet — manpower and dispatch are shown for this unit.
-            </div>
-          )}
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {summary && (

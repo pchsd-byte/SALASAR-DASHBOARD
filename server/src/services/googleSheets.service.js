@@ -77,6 +77,14 @@ export async function openLiveWorkbook({ knownModifiedTime = null } = {}) {
     fileId: meta.data.id,
     name: meta.data.name,
     modifiedTime,
+    sheetNames: workbook.SheetNames.map((name) => name.trim()),
+    // Whether the tab is there at all. getSheetValues answers [] for both "renamed away" and
+    // "present but empty", and those mean opposite things to the sync: the first is a sheet
+    // problem that must block stale-record cleanup, the second is a tab nobody has filled in
+    // yet. The caller can only tell them apart by asking.
+    hasSheet(sheetTitle) {
+      return workbook.SheetNames.some((name) => name.trim() === sheetTitle.trim());
+    },
     // A tab that has been renamed or removed reads as empty; the parsers then report that no
     // header rows were found rather than failing the whole run.
     getSheetValues(sheetTitle) {

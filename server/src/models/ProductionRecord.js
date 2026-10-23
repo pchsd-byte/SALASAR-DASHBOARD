@@ -3,6 +3,14 @@ import mongoose from 'mongoose';
 const productionRecordSchema = new mongoose.Schema(
   {
     date: { type: Date, required: true },
+    // Which plant produced it. Bhilai has its own progress tabs ("AMNS - Bhilai", "Utility
+    // Bridge - Bhilai", "Bhilai MHI Duct Progress"), and every one of them carries blocks headed
+    // with an HSD client's name — leftovers from whoever copied the sheet. Without this field a
+    // Bhilai block headed "RIL" would land on the same key as HSD's RIL and overwrite it, which
+    // is the same double-count the client-from-the-block rule exists to prevent (§7.3).
+    // Rows written before Bhilai production existed carry no value and are HSD, so HSD queries
+    // ask for { $ne: 'BU' } rather than { businessUnit: 'HSD' }.
+    businessUnit: { type: String, enum: ['HSD', 'BU'], default: 'HSD' },
     client: { type: String, required: true },
     processStage: {
       type: String,
@@ -27,8 +35,10 @@ const productionRecordSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// businessUnit joins the key for the reason above. config/db.js re-syncs this index at boot so
+// a deploy replaces the old three-field one rather than leaving both in place.
 productionRecordSchema.index(
-  { date: 1, client: 1, processStage: 1 },
+  { date: 1, businessUnit: 1, client: 1, processStage: 1 },
   { unique: true },
 );
 

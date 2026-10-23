@@ -76,7 +76,12 @@ function isSuspiciousIncrement(dailyIncrementQty, cumulativeQty, previousCumulat
   return cumulativeQty >= SUSPICIOUS_INCREMENT_FLOOR && dailyIncrementQty >= cumulativeQty * SUSPICIOUS_INCREMENT_RATIO;
 }
 
-export function parseProgressSheet(rows, client, sourceTab) {
+// `trustTabClient` inverts the rule above for Bhilai's tabs. Every block in "AMNS - Bhilai",
+// "Utility Bridge - Bhilai" and "Bhilai MHI Duct Progress" is headed with an HSD client's name
+// ("RIL", "AMNS", "MHI") — copied when the sheet was, and never corrected. Trusting those
+// headings would file Bhilai's steel under HSD's clients, so for those tabs the tab itself names
+// the client and the heading is reported as the mistake it is.
+export function parseProgressSheet(rows, client, sourceTab, { trustTabClient = false } = {}) {
   const warnings = [];
 
   const headerRowIndexes = findHeaderRowIndexes(rows);
@@ -96,10 +101,12 @@ export function parseProgressSheet(rows, client, sourceTab) {
     const blockMonth = majorityMonth(datePairs.map((p) => p.date));
 
     const labelled = blockClientLabel(headerRow);
-    const blockClient = labelled?.client ?? client;
+    const blockClient = trustTabClient ? client : labelled?.client ?? client;
     if (labelled && labelled.client !== client) {
       warnings.push(
-        `${sourceTab}: the ${blockMonth} block (row ${headerRowIdx}) is headed "${labelled.label}", so its figures are recorded under ${labelled.client}, not ${client}. Move it to the ${labelled.client} tab or correct its heading.`,
+        trustTabClient
+          ? `${sourceTab}: the ${blockMonth} block (row ${headerRowIdx}) is headed "${labelled.label}", which is another unit's client. This tab's own figures are recorded under ${client}; correct the heading in the sheet.`
+          : `${sourceTab}: the ${blockMonth} block (row ${headerRowIdx}) is headed "${labelled.label}", so its figures are recorded under ${labelled.client}, not ${client}. Move it to the ${labelled.client} tab or correct its heading.`,
       );
     }
 

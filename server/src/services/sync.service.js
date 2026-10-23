@@ -19,10 +19,20 @@ import { env } from '../config/env.js';
 const LIVE_WORKBOOK_KEY = 'live-workbook';
 const synopsisKey = (fileId) => `synopsis:${fileId}`;
 
+// Every progress tab in the live workbook, and which plant it belongs to.
+//
+// Bhilai's three tabs are read exactly like HSD's, with one difference: `trustTabClient`. Each
+// of them carries blocks headed with an HSD client's name ("RIL", "AMNS", "MHI") because the
+// sheet was copied from HSD's and the headings were never corrected. Reading the client from
+// those headings — the right rule for HSD (§7.3) — would file Bhilai's tonnage under L&T MHI
+// and RIL. For these tabs the tab names the client, and the heading is reported as a warning.
 const PROGRESS_TABS = [
-  { title: 'Adani Progress', client: 'Adani' },
-  { title: 'L&T MHI Progress', client: 'L&T MHI' },
-  { title: 'RIL Progress', client: 'RIL' },
+  { title: 'Adani Progress', client: 'Adani', businessUnit: 'HSD' },
+  { title: 'L&T MHI Progress', client: 'L&T MHI', businessUnit: 'HSD' },
+  { title: 'RIL Progress', client: 'RIL', businessUnit: 'HSD' },
+  { title: 'Bhilai MHI Duct Progress', client: 'MHI Duct', businessUnit: 'BU', trustTabClient: true },
+  { title: 'Utility Bridge - Bhilai', client: 'Utility Bridge', businessUnit: 'BU', trustTabClient: true },
+  { title: 'AMNS - Bhilai', client: 'AMNS', businessUnit: 'BU', trustTabClient: true },
 ];
 
 const DISPATCH_TABS = ['Daily Dispatch'];
@@ -174,13 +184,27 @@ async function syncManpowerTab(workbook, log) {
 async function syncProductionTabs(workbook, log) {
   const started = Date.now();
   const byKey = new Map();
-  let everyTabRead = true;
+  // Tracked per plant. With six tabs across two units, one renamed Bhilai tab used to be enough
+  // to switch off stale-record cleanup for HSD as well — silently, and for good.
+  const unitFullyRead = { HSD: true, BU: true };
 
   for (const tab of PROGRESS_TABS) {
     try {
-      const { records, warnings } = parseProgressSheet(workbook.getSheetValues(tab.title), tab.client, tab.title);
+      // A tab that is not in the workbook at all has been renamed or removed. That is a sheet
+      // problem worth saying out loud, and it must stop this unit's cleanup: everything the
+      // missing tab used to write would otherwise look like a record the sheet no longer
+      // contains, and be deleted. A tab that exists but is empty is simply not filled in yet.
+      if (workbook.hasSheet && !workbook.hasSheet(tab.title)) {
+        unitFullyRead[tab.businessUnit] = false;
+        note(log, tab.title, `This progress tab is not in the workbook — it has been renamed or removed. ${tab.businessUnit === 'BU' ? 'Bhilai' : 'HSD'} production figures already stored were kept.`, 'error');
+        continue;
+      }
+      const { records, warnings } = parseProgressSheet(workbook.getSheetValues(tab.title), tab.client, tab.title, {
+        trustTabClient: Boolean(tab.trustTabClient),
+      });
+      records.forEach((record) => { record.businessUnit = tab.businessUnit; });
       warnings.forEach((w) => note(log, tab.title, w, 'warning'));
-      if (records.length === 0) everyTabRead = false;
+      if (records.length === 0) unitFullyRead[tab.businessUnit] = false;
 
       // A block can now be recorded under a client other than its tab's (L&T MHI's tab holds
       // blocks headed "RIL" for May–Nov 2025), so two tabs can produce the same
@@ -188,21 +212,24 @@ async function syncProductionTabs(workbook, log) {
       // copies of the RIL tab — one record is stored. Where they disagree, the figure from the
       // client's own tab is kept and the disagreement reported.
       for (const record of records) {
-        const key = `${record.date.toISOString()}|${record.client}|${record.processStage}`;
+        // businessUnit is part of the key for the same reason it is part of the unique index:
+        // a Bhilai block and an HSD block can name the same client on the same day.
+        const key = `${record.date.toISOString()}|${record.businessUnit}|${record.client}|${record.processStage}`;
         const existing = byKey.get(key);
         if (!existing) {
           byKey.set(key, record);
           continue;
         }
         const differs = existing.cumulativeQty !== record.cumulativeQty || existing.dailyIncrementQty !== record.dailyIncrementQty;
-        const recordIsHome = PROGRESS_TABS.find((t) => t.title === record.sourceTab)?.client === record.client;
+        const home = PROGRESS_TABS.find((t) => t.title === record.sourceTab);
+        const recordIsHome = home?.client === record.client && home?.businessUnit === record.businessUnit;
         const kept = recordIsHome ? record : existing;
         if (differs) {
           const other = kept === record ? existing : record;
           note(
             log,
             'Production',
-            `${record.date.toISOString().slice(0, 10)} ${record.client} ${record.processStage}: "${kept.sourceTab}" says ${kept.cumulativeQty}/${kept.dailyIncrementQty} but "${other.sourceTab}" says ${other.cumulativeQty}/${other.dailyIncrementQty} — using "${kept.sourceTab}".`,
+            `${record.date.toISOString().slice(0, 10)} ${record.businessUnit} ${record.client} ${record.processStage}: "${kept.sourceTab}" says ${kept.cumulativeQty}/${kept.dailyIncrementQty} but "${other.sourceTab}" says ${other.cumulativeQty}/${other.dailyIncrementQty} — using "${kept.sourceTab}".`,
             'warning',
           );
         }
@@ -210,7 +237,7 @@ async function syncProductionTabs(workbook, log) {
       }
       log.tabsProcessed.push(tab.title);
     } catch (err) {
-      everyTabRead = false;
+      unitFullyRead[tab.businessUnit] = false;
       note(log, tab.title, err.message, 'error');
     }
   }
@@ -222,14 +249,10 @@ async function syncProductionTabs(workbook, log) {
     return;
   }
 
-  const times = valid.map((r) => r.date.getTime());
-  const span = { $gte: new Date(Math.min(...times)), $lte: new Date(Math.max(...times)) };
-  const storedBefore = await ProductionRecord.countDocuments({ date: span });
-
   const syncedAt = new Date();
   const ops = valid.map((rec) => ({
     updateOne: {
-      filter: { date: rec.date, client: rec.client, processStage: rec.processStage },
+      filter: { date: rec.date, businessUnit: rec.businessUnit, client: rec.client, processStage: rec.processStage },
       update: { $set: { ...rec, syncedAt } },
       upsert: true,
     },
@@ -241,23 +264,41 @@ async function syncProductionTabs(workbook, log) {
   // wrong and then corrected, a stage renamed, or a block re-attributed to its real client
   // (the RIL-headed blocks above) all leave the old document behind — summed into every total
   // forever. Anything in the span this parse covers that the parse did not write is removed,
-  // but only when every tab was read and the parse is not suspiciously smaller than what it
-  // replaces.
+  // but only when that plant's tabs were all read and the parse is not suspiciously smaller
+  // than what it replaces.
+  //
+  // Each plant is judged on its own: HSD's three tabs and Bhilai's three are separate sources
+  // that happen to live in one workbook, and a problem in one is no reason to stop tidying the
+  // other — or, worse, to delete its rows because this run never read them.
   let deleted = 0;
-  if (!everyTabRead) {
-    note(log, 'Production', 'Not every progress tab could be read this run, so no old production records were removed.', 'warning');
-  } else if (valid.length < storedBefore * MIN_KEPT_SHARE) {
-    note(
-      log,
-      'Production',
-      `This run read ${valid.length} production records for a span that already held ${storedBefore}. That is too large a drop to trust, so nothing was removed.`,
-      'error',
-    );
-  } else {
-    const stale = await ProductionRecord.deleteMany({ date: span, syncedAt: { $lt: syncedAt } });
-    deleted = stale.deletedCount;
-    if (deleted > 0) {
-      note(log, 'Production', `Removed ${deleted} production record(s) the current sheet no longer contains (a corrected date, a renamed stage, or a block now recorded under its own client).`, 'info');
+  for (const unit of ['HSD', 'BU']) {
+    const unitRecords = valid.filter((r) => r.businessUnit === unit);
+    if (unitRecords.length === 0) continue;
+
+    const times = unitRecords.map((r) => r.date.getTime());
+    const span = { $gte: new Date(Math.min(...times)), $lte: new Date(Math.max(...times)) };
+    const unitQuery = unit === 'BU' ? { businessUnit: 'BU' } : { businessUnit: { $ne: 'BU' } };
+    const storedBefore = await ProductionRecord.countDocuments({ date: span, ...unitQuery });
+    const label = unit === 'BU' ? 'Bhilai' : 'HSD';
+
+    if (!unitFullyRead[unit]) {
+      note(log, 'Production', `Not every ${label} progress tab could be read this run, so no old ${label} production records were removed.`, 'warning');
+      continue;
+    }
+    if (unitRecords.length < storedBefore * MIN_KEPT_SHARE) {
+      note(
+        log,
+        'Production',
+        `This run read ${unitRecords.length} ${label} production records for a span that already held ${storedBefore}. That is too large a drop to trust, so nothing was removed.`,
+        'error',
+      );
+      continue;
+    }
+
+    const stale = await ProductionRecord.deleteMany({ date: span, ...unitQuery, syncedAt: { $lt: syncedAt } });
+    deleted += stale.deletedCount;
+    if (stale.deletedCount > 0) {
+      note(log, 'Production', `Removed ${stale.deletedCount} ${label} production record(s) the current sheet no longer contains (a corrected date, a renamed stage, or a block now recorded under its own client).`, 'info');
     }
   }
 

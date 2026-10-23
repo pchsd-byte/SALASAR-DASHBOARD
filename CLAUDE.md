@@ -17,7 +17,7 @@ The plant already tracked everything — production, dispatch, manpower — in a
 | Term | Meaning |
 |---|---|
 | **HSD** | Heavy Structure Division — the main plant. Towers, poles, bridge components. |
-| **BU / Bhilai** | The second business unit. Manpower only — no production or dispatch source connected. |
+| **BU / Bhilai** | The second business unit. Has all three sources since Oct 2026: manpower, dispatch (its blocks inside the Daily Dispatch tab, §7.4) and production (its own three progress tabs, §7.3). |
 | **MT** | Metric tons. Every quantity except manpower headcount. |
 | **Client** | Adani, L&T MHI, RIL, AFCONS, AMNS — who the steel is for. |
 | **Process stage** | cutting → fitUp → welding → visual → blasting → finalCoat. `finalCoat` = production completed. |
@@ -116,7 +116,7 @@ Drive file ──► getSheetValues / getWorkbookRows   (xlsx -> array-of-arrays
 |---|---|---|
 | Env var | `HSD_SPREADSHEET_ID` | `SYNOPSIS_FOLDER_ID` |
 | Shape | One `.xlsx`, many tabs | One `.xlsx` per month, in a folder |
-| Tabs / files | `Manpower`, `Adani Progress`, `L&T MHI Progress`, `RIL Progress`, `Daily Dispatch` | `april.xlsx`, `may.xlsx`, … |
+| Tabs / files | `Manpower`, `Daily Dispatch`; HSD progress: `Adani Progress`, `L&T MHI Progress`, `RIL Progress`; Bhilai progress: `Bhilai MHI Duct Progress`, `Utility Bridge - Bhilai`, `AMNS - Bhilai` | `april.xlsx`, `may.xlsx`, … |
 | Feeds | Manpower, Production, Dispatch | Dispatch Synopsis |
 | UI | Dashboard → **Overview** toggle | Dashboard → **Dispatch Synopsis** toggle |
 | Write strategy | Upsert + gated stale cleanup (all three sources) | Whole-month replace, in a transaction |
@@ -203,7 +203,7 @@ No TypeScript, no test framework (tests use Node's built-in `node:test`; the onl
         ├── app.js              # middleware + route mounting
         ├── config/{env,db,google}.js
         ├── middleware/auth.js
-        ├── models/             # 13 Mongoose models (incl. TeamMember — people and access)
+        ├── models/             # 15 Mongoose models (incl. TeamMember, AccessRequest, SyncState)
         ├── routes/ · controllers/
         ├── services/
         │   ├── sync.service.js · googleSheets.service.js · payloadCache.js
@@ -349,7 +349,8 @@ Three hard-won rules, each guarding a bug that shipped:
 Each date occupies **two** columns: a running cumulative and that day's increment. Only the cumulative column carries the date in the header.
 
 - Totals are summed from `dailyIncrementQty`, **never** derived from cumulative differences. RIL's running total genuinely falls twice (June 2025, recorded as negative increments −87 / −95 — keep them). The L&T MHI "reset" on 1 Dec 2025 is **not** a reset — see next point.
-- **The client comes from the block's own header cell** (`ADANI` / `MHI` / `RIL` beside `SL.No`), not the tab name. For May–Nov 2025 the `L&T MHI Progress` tab holds blocks headed `RIL`, identical to the RIL tab; reading the client from the tab counted that steel twice (2,427 MT of final coat). A mismatch is warned on every sync. The sync then merges tabs by key, preferring the client's own tab on disagreement.
+- **Bhilai's three tabs invert that rule** (`trustTabClient`). Every block in `Bhilai MHI Duct Progress`, `Utility Bridge - Bhilai` and `AMNS - Bhilai` is headed with an *HSD* client's name — "MHI", "RIL", "AMNS" — copied when the sheet was and never corrected. Trusting those headings files Bhilai's tonnage under L&T MHI and RIL. For these tabs **the tab names the client** (MHI Duct / Utility Bridge / AMNS) and the heading is reported as a warning. Records are tagged `businessUnit: 'BU'`, which is also part of the unique key, so a Bhilai block headed "RIL" can never land on HSD's RIL.
+- **The client comes from the block's own header cell** (`ADANI` / `MHI` / `RIL` beside `SL.No`), not the tab name — for HSD's tabs. For May–Nov 2025 the `L&T MHI Progress` tab holds blocks headed `RIL`, identical to the RIL tab; reading the client from the tab counted that steel twice (2,427 MT of final coat). A mismatch is warned on every sync. The sync then merges tabs by key, preferring the client's own tab on disagreement.
 - Each block also carries columns for the first days of the next month. **A block's own month wins** for a given date; a trailing column is used only if no block covers that date as its own month; disagreeing duplicates are warned (RIL's January block labels its trailing columns 02-02 / 02-03 with figures that differ from February's).
 - An increment ≥90% of the cumulative (and ≥50) is rejected as a mid-edit artefact — but only once the stage already has a running total it continues from, so day one of tracking (and the day after a genuine reset) is kept.
 - Records carry `sourceRowIndex` / `sourceCol` of their cumulative cell (manpower records do too).
@@ -398,7 +399,7 @@ Runs on `SYNC_CRON` (default `30 21 * * *` in `SYNC_TIMEZONE`, default Asia/Kolk
 | Collection | Key | Cleanup |
 |---|---|---|
 | `ManpowerRecord` | `date + businessUnit + category + shift` | One run `syncedAt`, then delete anything on the parsed dates the run did not touch |
-| `ProductionRecord` | `date + client + processStage` | Delete anything in the parsed date span the run did not touch — only when every progress tab was read |
+| `ProductionRecord` | `date + businessUnit + client + processStage` | Delete anything in the parsed span the run did not touch — **judged per plant**: HSD's three tabs and Bhilai's three are separate sources in one workbook, so a renamed Bhilai tab stops Bhilai's cleanup only. A tab missing from the workbook (`workbook.hasSheet`) is an error that blocks that plant's cleanup; a tab that exists but is empty is not. `config/db.js` re-syncs this index at boot, because the key gained `businessUnit` |
 | `DispatchRecord` | `sourceTab + sourceRowIndex + date` | Delete anything in the tab the run did not touch — row positions shift as the sheet is edited |
 | `SynopsisMonth` / `SynopsisDispatchRecord` | `month` / `date+department+mode` | Whole month rewritten **in a transaction** (falls back to sequential writes on a standalone mongod). A month whose workbook left the folder is removed — only after a run where every workbook downloaded. Two workbooks for one month: the newest `modifiedTime` wins, clash warned. |
 
@@ -542,6 +543,8 @@ Reconstructed from the commit history; useful for understanding why things are s
 **Stage 5 — Data-accuracy work (3–7 Sep).** `fixing stages of hsd`, `cutting fixing`, `sep fix`. Stale-record cleanup introduced for dispatch after row-position shifts caused double counting.
 
 **Stage 6 — Dispatch Synopsis (7–9 Sep).** `Synopsis dispach added` → `custom range` → `renamed to dispatch synopsis`. New parser, two models, folder-based sync, a full chart suite, then per-month and custom-range filtering with pro-rated plan.
+
+**Stage 8 — Bhilai production (Oct 2026).** Bhilai stopped being manpower-and-dispatch-only: its three progress tabs are read exactly as HSD's, with the client taken from the tab because every block heading names an HSD client. `businessUnit` joined `ProductionRecord`'s key, and production cleanup became per plant.
 
 **Stage 7 — Manpower correctness (9 Sep).** `manpower fixed`, `fixing manpower on site`. The three rules in §7.2, the half-shift weighting, and `check:manpower`.
 
