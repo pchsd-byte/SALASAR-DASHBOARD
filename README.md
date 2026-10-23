@@ -46,9 +46,12 @@ The consequence shapes the whole codebase: the source of truth is a spreadsheet 
 ### Production Synopsis
 Production by process stage (cutting → fit-up → welding → visual → blasting → final coat), dispatch by client, and manpower by category and shift — for both business units, HSD and Bhilai. Everything filters by date range (presets or a custom calendar range), by business unit and by client. Charts expand into a modal for a closer look.
 
-Two details that matter for correctness:
+Both plants have all three sources. Bhilai reads its own three progress tabs (`Bhilai MHI Duct Progress`, `Utility Bridge - Bhilai`, `AMNS - Bhilai`) for clients MHI Duct, Utility Bridge and AMNS.
+
+Three details that matter for correctness:
 - **Manpower is weighted**: `Day + Night + ½ × 12.30`, because `12.30` is a half shift and counts as half a head.
 - **Production totals are summed from daily increments**, never derived from differences in the running cumulative — the cumulative genuinely falls sometimes, and those are real corrections.
+- **Bhilai's figures are kept apart from HSD's by plant, not by client name.** Every block in Bhilai's tabs is headed with an HSD client's name, left over from the sheet being copied; the tab decides the client, and the wrong heading is reported as a warning on every sync.
 
 ### Dispatch Synopsis
 A second view, fed by a folder of one-workbook-per-month synopsis reports. It charts department-wise dispatch against plan: monthly plan vs actual, achievement against target, day-by-day tonnage by group, cumulative pace, share by group and by Inhouse/Job Work/Buyout, per-department performance, a department-by-month grid, and tower/pole counts. Filterable by month or a custom range, with the plan pro-rated across a partial range.
@@ -126,7 +129,7 @@ Drive file ──► getSheetValues / getWorkbookRows   (xlsx → array of array
 |---|---|---|
 | Env var | `HSD_SPREADSHEET_ID` | `SYNOPSIS_FOLDER_ID` |
 | Shape | One `.xlsx`, many tabs | One `.xlsx` per month, in a folder |
-| Feeds | Manpower, Production, Dispatch | Dispatch Synopsis |
+| Feeds | Manpower, Production and Dispatch — for both HSD and Bhilai | Dispatch Synopsis |
 | Write strategy | Upsert + gated stale cleanup | Whole month replaced, in a transaction |
 
 Both are uploaded `.xlsx` files rather than native Google Sheets, so they are downloaded as raw bytes and parsed locally with `xlsx`.
