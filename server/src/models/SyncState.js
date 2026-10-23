@@ -17,6 +17,11 @@ const syncStateSchema = new mongoose.Schema(
     key: { type: String, required: true, unique: true },
     fileId: { type: String, default: null },
     modifiedTime: { type: Date, default: null },
+    // Which tabs the build that stored this version was reading. A deploy that teaches the sync
+    // about new tabs — Bhilai's three progress tabs, say — changes this even though the file in
+    // Drive has not been touched, so the next run downloads and re-parses instead of skipping a
+    // sheet it can now read more of.
+    sourceSignature: { type: String, default: null },
     // For synopsis workbooks: which month the file was found to report on, so a skipped file
     // still counts as covering its month and is not treated as one that left the folder.
     month: { type: String, default: null },

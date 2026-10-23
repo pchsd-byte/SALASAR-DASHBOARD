@@ -12,6 +12,7 @@ import { DispatchRecord } from '../src/models/DispatchRecord.js';
 import { SynopsisMonth } from '../src/models/SynopsisMonth.js';
 import { SynopsisDispatchRecord } from '../src/models/SynopsisDispatchRecord.js';
 import { SyncLog } from '../src/models/SyncLog.js';
+import { SyncState } from '../src/models/SyncState.js';
 import { ScheduledEmail } from '../src/models/ScheduledEmail.js';
 import { buildHsdSummaryData } from '../src/controllers/dashboard.controller.js';
 import { progressBlock, dispatchBlock, manpowerBlock, synopsisTable, day } from './helpers/sheets.js';
@@ -284,7 +285,8 @@ describe('synopsis sync', () => {
     await runSync('manual', sources());
     const before = await counts();
     const downloads = [];
-    const log = await runSync('manual', sources({ downloads }));
+    // The scheduled run is the one that skips. A manual "Sync now" always re-reads (below).
+    const log = await runSync('cron', sources({ downloads }));
 
     assert.deepEqual(downloads, ['live:skipped'], 'no workbook bytes fetched at all on the second run');
     assert.deepEqual(await counts(), before, 'and nothing stored was changed or cleaned away');
@@ -301,7 +303,7 @@ describe('synopsis sync', () => {
       ['Ramboll Export', 100, 20, 25, null],
     ]);
     const downloads = [];
-    await runSync('manual', sources({ files: { jan: editedJan, feb: FEB }, downloads }));
+    await runSync('cron', sources({ files: { jan: editedJan, feb: FEB }, downloads }));
 
     assert.deepEqual(downloads, ['live:skipped', 'jan'], 'only the edited workbook is fetched');
     assert.equal((await SynopsisMonth.findOne({ month: '2026-01' }).lean()).dispatchedTotal, 455);
@@ -578,5 +580,81 @@ describe('Bhilai production', () => {
     tabs['Bhilai MHI Duct Progress'] = [];
     const log = await runSync('manual', sources({ tabs }));
     assert.ok(!errors(log).some((i) => /renamed or removed/.test(i.message)), 'a tab nobody has filled in yet is not a sheet problem');
+  });
+});
+
+// --- re-reading after a code change ------------------------------------------------------------
+// Bhilai's tabs were added to the code, deployed, and nothing appeared: the workbook itself had
+// not been edited, so the "unchanged in Drive" check skipped the download and the new tabs were
+// never read. The file had not changed; the build had.
+
+describe('a changed build re-reads an unchanged sheet', () => {
+  test('"Sync now" always re-reads, however long the sheet has sat still', async () => {
+    await runSync('cron', sources());
+    const downloads = [];
+    await runSync('manual', sources({ downloads }));
+
+    assert.ok(downloads.includes('live'), 'the live workbook is downloaded, not skipped');
+    assert.ok(downloads.some((d) => d === 'jan' || d === 'feb'), 'and so are the synopsis workbooks');
+  });
+
+  test('a scheduled run re-reads when this build reads different tabs than the stored one', async () => {
+    await runSync('cron', sources());
+    const stored = await SyncState.findOne({ key: 'live-workbook' }).lean();
+    assert.ok(stored.sourceSignature, 'the run records what it was reading');
+
+    // Exactly what a deploy that adds a tab looks like from the database's point of view.
+    await SyncState.updateOne({ key: 'live-workbook' }, { $set: { sourceSignature: 'older-build' } });
+    const downloads = [];
+    await runSync('cron', sources({ downloads }));
+    assert.ok(downloads.includes('live'), 'the sheet is read again rather than skipped');
+
+    const after = await SyncState.findOne({ key: 'live-workbook' }).lean();
+    assert.equal(after.sourceSignature, stored.sourceSignature, 'and the new signature is stored');
+  });
+
+  test('once the build settles, the scheduled run goes back to skipping', async () => {
+    await runSync('cron', sources());
+    const downloads = [];
+    await runSync('cron', sources({ downloads }));
+    assert.deepEqual(downloads, ['live:skipped'], 'no bytes fetched when neither file nor build changed');
+  });
+});
+
+// --- upgrading a database that predates businessUnit -------------------------------------------
+// ProductionRecord's unique key gained businessUnit for Bhilai. Rows written before that have no
+// such field, and the first sync after the change inserted a second copy of every one of them —
+// 4,791 duplicates in production, every HSD total doubled — because the upsert filter asked for
+// businessUnit: 'HSD' and nothing matched.
+
+describe('production rows written before businessUnit existed', () => {
+  // Note this one passes even with the broken filter — the stale copy is swept up by the
+  // cleanup step in this scenario. It documents the end state; the test below is the guard,
+  // because in production the 70% gate refused that cleanup and the duplicates survived.
+  test('end up tagged, carrying the figures the sheet holds now', async () => {
+    // Exactly what the collection looked like: the right figures, no businessUnit.
+    await ProductionRecord.collection.insertOne({
+      date: day('2026-08-01'), client: 'Adani', processStage: 'cutting',
+      cumulativeQty: 999, dailyIncrementQty: 999, sourceTab: 'Adani Progress', syncedAt: new Date('2026-01-01'),
+    });
+
+    await runSync('manual', sources());
+
+    const rows = await ProductionRecord.find({ date: day('2026-08-01'), client: 'Adani', processStage: 'cutting' }).lean();
+    assert.equal(rows.length, 1, 'one row, not two');
+    assert.equal(rows[0].businessUnit, 'HSD', 'and it carries the unit now');
+    assert.equal(rows[0].cumulativeQty, 10, 'with the figures the sheet currently holds');
+  });
+
+  test('so the unit totals do not double', async () => {
+    await runSync('manual', sources());
+    const once = await ProductionRecord.countDocuments({ businessUnit: { $ne: 'BU' } });
+
+    // Strip the tag from every HSD row, as an older database would have it, and sync again.
+    await ProductionRecord.collection.updateMany({ businessUnit: 'HSD' }, { $unset: { businessUnit: '' } });
+    await runSync('manual', sources());
+
+    assert.equal(await ProductionRecord.countDocuments({ businessUnit: { $ne: 'BU' } }), once, 'same number of HSD rows as before');
+    assert.equal(await ProductionRecord.countDocuments({ businessUnit: { $exists: false } }), 0, 'and none left untagged');
   });
 });

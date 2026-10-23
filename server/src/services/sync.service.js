@@ -19,6 +19,19 @@ import { env } from '../config/env.js';
 const LIVE_WORKBOOK_KEY = 'live-workbook';
 const synopsisKey = (fileId) => `synopsis:${fileId}`;
 
+// What this build reads out of the live workbook. Stored alongside the file's modifiedTime, and
+// compared on every run.
+//
+// This exists because of a real incident: Bhilai's three progress tabs were added to the code,
+// deployed, and then nothing appeared — the workbook itself had not been edited, so the
+// "unchanged in Drive, don't download" check skipped it, and the new tabs were never read. The
+// file had not changed; the code had. A run now re-reads the sheet when either is different.
+const sourceSignature = () =>
+  crypto.createHash('sha1')
+    .update(JSON.stringify([PROGRESS_TABS.map((t) => [t.title, t.client, t.businessUnit]), DISPATCH_TABS, MANPOWER_TAB]))
+    .digest('hex')
+    .slice(0, 12);
+
 // Every progress tab in the live workbook, and which plant it belongs to.
 //
 // Bhilai's three tabs are read exactly like HSD's, with one difference: `trustTabClient`. Each
@@ -36,6 +49,7 @@ const PROGRESS_TABS = [
 ];
 
 const DISPATCH_TABS = ['Daily Dispatch'];
+const MANPOWER_TAB = 'Manpower';
 
 // A cleanup step only runs when the new parse is at least this large a share of what it would
 // replace. The live workbook is edited all day, and a sync that lands while someone has a
@@ -123,7 +137,7 @@ function validateRecords(Model, records, log, tab) {
 
 async function syncManpowerTab(workbook, log) {
   const started = Date.now();
-  const tab = 'Manpower';
+  const tab = MANPOWER_TAB;
   const { records, warnings } = parseManpowerSheet(workbook.getSheetValues(tab));
   warnings.forEach((w) => note(log, tab, w, 'warning'));
   const valid = validateRecords(ManpowerRecord, records, log, tab);
@@ -252,7 +266,17 @@ async function syncProductionTabs(workbook, log) {
   const syncedAt = new Date();
   const ops = valid.map((rec) => ({
     updateOne: {
-      filter: { date: rec.date, businessUnit: rec.businessUnit, client: rec.client, processStage: rec.processStage },
+      // HSD matches rows that predate businessUnit as well as tagged ones: in MongoDB a filter
+      // of null matches a missing field, and $in keeps both in play. Without this the first run
+      // after the field was added inserted a second copy of every untagged row instead of
+      // updating it — 4,791 duplicates, and every HSD total doubled — because the filter no
+      // longer matched what was stored. Each row heals itself on the run that touches it.
+      filter: {
+        date: rec.date,
+        businessUnit: rec.businessUnit === 'BU' ? 'BU' : { $in: ['HSD', null] },
+        client: rec.client,
+        processStage: rec.processStage,
+      },
       update: { $set: { ...rec, syncedAt } },
       upsert: true,
     },
@@ -471,7 +495,7 @@ async function writeSynopsisMonth(file, parsed, log) {
   return true;
 }
 
-async function syncSynopsisFolder(log, sources) {
+async function syncSynopsisFolder(log, sources, { force = false } = {}) {
   const started = Date.now();
   // Never return silently. A sync that skips this step without saying so reports plain
   // "success" while the Dispatch Synopsis view stays empty, and there is then nothing
@@ -511,7 +535,7 @@ async function syncSynopsisFolder(log, sources) {
   let everyFileRead = true;
   for (const file of files) {
     const tab = `Synopsis/${file.name}`;
-    const seen = known.get(synopsisKey(file.id));
+    const seen = force ? null : known.get(synopsisKey(file.id));
     if (seen?.month && storedMonths.has(seen.month) && seen.modifiedTime && file.modifiedTime
         && new Date(seen.modifiedTime).getTime() === new Date(file.modifiedTime).getTime()) {
       unchangedMonths.add(seen.month);
@@ -645,8 +669,14 @@ export async function runSync(trigger = 'manual', sources = driveSources) {
     // no guard, so its failure skipped production, dispatch and the separate synopsis folder.
     let workbook = null;
     const knownLive = await SyncState.findOne({ key: LIVE_WORKBOOK_KEY }).lean();
+    const signature = sourceSignature();
+    // Skipping the download is an optimisation for the daily schedule. It must never apply when
+    // an admin has pressed "Sync now" — they are asking for the sheet to be read, usually
+    // because something is missing — nor when this build reads different tabs than the one that
+    // stored the figures.
+    const mayskip = trigger !== 'manual' && knownLive?.sourceSignature === signature;
     try {
-      workbook = await sources.openLiveWorkbook({ knownModifiedTime: knownLive?.modifiedTime ?? null });
+      workbook = await sources.openLiveWorkbook({ knownModifiedTime: mayskip ? knownLive?.modifiedTime ?? null : null });
     } catch (err) {
       note(log, 'Live workbook', `Could not download the live workbook: ${err.message}`, 'error');
     }
@@ -669,12 +699,12 @@ export async function runSync(trigger = 'manual', sources = driveSources) {
       if (cleanPass && workbook.modifiedTime) {
         await SyncState.updateOne(
           { key: LIVE_WORKBOOK_KEY },
-          { $set: { fileId: workbook.fileId, modifiedTime: workbook.modifiedTime, syncedAt: new Date() } },
+          { $set: { fileId: workbook.fileId, modifiedTime: workbook.modifiedTime, sourceSignature: signature, syncedAt: new Date() } },
           { upsert: true },
         );
       }
     }
-    await step(log, 'Synopsis', () => syncSynopsisFolder(log, sources));
+    await step(log, 'Synopsis', () => syncSynopsisFolder(log, sources, { force: trigger === 'manual' }));
 
     const hasErrors = log.issues.some((i) => i.severity === 'error');
     const anySourceOk = log.sources.some((s) => s.ok);
