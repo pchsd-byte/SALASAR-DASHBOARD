@@ -413,6 +413,8 @@ Without cleanup, a layout change writes new rows *beside* the old ones under a d
 
 Summary and synopsis payloads carry `dataAsOf` (the newest `success`/`partial` sync), shown as "Figures as of the … sync", so the page says how old its figures are.
 
+**A chart whose range holds nothing is not drawn.** Both dispatch cards and both dispatch tiles appear only when the selected range actually contains dispatch (`Dashboard.jsx`, `dispatchAvailable`). Bhilai prompted it — the sheet has recorded no Bhilai dispatch block since April 2026, so its cards sat permanently on "No dispatches recorded yet in this range", and a tile read "Dispatched (21 Mar) 19 MT" beside an October range. Nothing is hidden per unit or hard-coded: the moment a range contains dispatch, all four come back by themselves.
+
 **The client asks the server for data at exactly two moments: when the page loads, and when an admin runs "Sync now"** (which invalidates the summary, synopsis, insights and status queries together). There is no polling and no websocket — an open dashboard makes no requests at all. *"The dashboard is showing an old number"* is answered by reloading the page.
 
 "Today" and default ranges use the **IST** calendar day (`istToday()` in `dashboard.controller.js`); dates are validated as `YYYY-MM-DD` and answered with 400, never silently queried as 1970.

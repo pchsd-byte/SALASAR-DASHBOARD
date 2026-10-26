@@ -98,7 +98,14 @@ export function Dashboard() {
   // because the payload still carries it, and a unit without a source would say so here rather
   // than drawing empty charts.
   const productionAvailable = summary?.production?.available ?? false;
-  const dispatchAvailable = summary?.dispatch?.available ?? false;
+  // Both charts come out when the selected range holds no dispatch at all — two cards saying
+  // "no dispatches recorded yet in this range" told nobody anything. Bhilai is the case that
+  // prompted it: the sheet has written no Bhilai dispatch block since April 2026, so its cards
+  // were permanently empty. Nothing is hidden by unit or hard-coded: the moment a range does
+  // contain dispatch — a Bhilai block added to the Daily Dispatch tab, say — both charts come
+  // back on their own.
+  const dispatchAvailable = (summary?.dispatch?.available ?? false)
+    && ((summary?.dispatch?.byClient?.length ?? 0) > 0 || (summary?.dispatch?.trendByClient?.length ?? 0) > 0);
   const isSynopsis = view === 'synopsis';
 
   return (
@@ -166,7 +173,10 @@ export function Dashboard() {
               unit="on site"
               accent="var(--series-1)"
             />
-            {summary?.dispatch?.available && (
+            {/* Gated the same way as the charts: this tile shows the most recent day on record,
+                which read as "Dispatched (21 Mar) 19 MT" next to an October range — a figure
+                from seven months earlier, in a range that holds no dispatch at all. */}
+            {dispatchAvailable && (
               <StatCard
                 compact
                 label={

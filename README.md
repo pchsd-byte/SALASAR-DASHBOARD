@@ -53,6 +53,8 @@ Three details that matter for correctness:
 - **Production totals are summed from daily increments**, never derived from differences in the running cumulative — the cumulative genuinely falls sometimes, and those are real corrections.
 - **Bhilai's figures are kept apart from HSD's by plant, not by client name.** Bhilai's blocks are headed with an HSD client's name, left over from the sheet being copied; the tab decides the client, and the wrong heading is reported as a warning on every sync.
 
+Cards follow the data: the dispatch charts and tiles are drawn only when the selected range holds dispatch, so a plant with none shows production and manpower rather than empty placeholders — and they reappear on their own as soon as the sheet records some.
+
 ### Dispatch Synopsis
 A second view, fed by a folder of one-workbook-per-month synopsis reports. It charts department-wise dispatch against plan: monthly plan vs actual, achievement against target, day-by-day tonnage by group, cumulative pace, share by group and by Inhouse/Job Work/Buyout, per-department performance, a department-by-month grid, and tower/pole counts. Filterable by month or a custom range, with the plan pro-rated across a partial range.
 
