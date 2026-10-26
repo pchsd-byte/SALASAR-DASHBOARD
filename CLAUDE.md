@@ -17,7 +17,7 @@ The plant already tracked everything — production, dispatch, manpower — in a
 | Term | Meaning |
 |---|---|
 | **HSD** | Heavy Structure Division — the main plant. Towers, poles, bridge components. |
-| **BU / Bhilai** | The second business unit. Has all three sources since Oct 2026: manpower, dispatch (its blocks inside the Daily Dispatch tab, §7.4) and production (its own three progress tabs, §7.3). |
+| **BU / Bhilai** | The second business unit. Manpower; dispatch from its own blocks inside the Daily Dispatch tab (§7.4 — **the sheet has none after April 2026**); production from **one** tab, `Bhilai MHI Duct Progress` (§7.3). The plant's instruction (Oct 2026): Bhilai's section takes that tab's figures and merges nothing from anywhere else. |
 | **MT** | Metric tons. Every quantity except manpower headcount. |
 | **Client** | Adani, L&T MHI, RIL, AFCONS, AMNS — who the steel is for. |
 | **Process stage** | cutting → fitUp → welding → visual → blasting → finalCoat. `finalCoat` = production completed. |
@@ -116,7 +116,7 @@ Drive file ──► getSheetValues / getWorkbookRows   (xlsx -> array-of-arrays
 |---|---|---|
 | Env var | `HSD_SPREADSHEET_ID` | `SYNOPSIS_FOLDER_ID` |
 | Shape | One `.xlsx`, many tabs | One `.xlsx` per month, in a folder |
-| Tabs / files | `Manpower`, `Daily Dispatch`; HSD progress: `Adani Progress`, `L&T MHI Progress`, `RIL Progress`; Bhilai progress: `Bhilai MHI Duct Progress`, `Utility Bridge - Bhilai`, `AMNS - Bhilai` | `april.xlsx`, `may.xlsx`, … |
+| Tabs / files | `Manpower`, `Daily Dispatch`; HSD progress: `Adani Progress`, `L&T MHI Progress`, `RIL Progress`; Bhilai progress: `Bhilai MHI Duct Progress` (the only one read — `Utility Bridge - Bhilai` and `AMNS - Bhilai` stopped in March 2026 and are deliberately skipped) | `april.xlsx`, `may.xlsx`, … |
 | Feeds | Manpower, Production, Dispatch | Dispatch Synopsis |
 | UI | Dashboard → **Overview** toggle | Dashboard → **Dispatch Synopsis** toggle |
 | Write strategy | Upsert + gated stale cleanup (all three sources) | Whole-month replace, in a transaction |
@@ -349,7 +349,7 @@ Three hard-won rules, each guarding a bug that shipped:
 Each date occupies **two** columns: a running cumulative and that day's increment. Only the cumulative column carries the date in the header.
 
 - Totals are summed from `dailyIncrementQty`, **never** derived from cumulative differences. RIL's running total genuinely falls twice (June 2025, recorded as negative increments −87 / −95 — keep them). The L&T MHI "reset" on 1 Dec 2025 is **not** a reset — see next point.
-- **Bhilai's three tabs invert that rule** (`trustTabClient`). Every block in `Bhilai MHI Duct Progress`, `Utility Bridge - Bhilai` and `AMNS - Bhilai` is headed with an *HSD* client's name — "MHI", "RIL", "AMNS" — copied when the sheet was and never corrected. Trusting those headings files Bhilai's tonnage under L&T MHI and RIL. For these tabs **the tab names the client** (MHI Duct / Utility Bridge / AMNS) and the heading is reported as a warning. Records are tagged `businessUnit: 'BU'`, which is also part of the unique key, so a Bhilai block headed "RIL" can never land on HSD's RIL.
+- **Bhilai's tab inverts that rule** (`trustTabClient`). Every block in `Bhilai MHI Duct Progress` is headed `MHI` — copied when the sheet was and never corrected — so trusting the heading would file Bhilai's tonnage under HSD's L&T MHI. For this tab **the tab names the client** (`MHI Duct`) and the heading is reported as a warning. Records are tagged `businessUnit: 'BU'`, which is also part of the unique key, so the two can never share a row. Only this tab feeds Bhilai: `Utility Bridge - Bhilai` and `AMNS - Bhilai` are a different project, stopped in March 2026, and are not read (their 1,668 stored rows were removed in Oct 2026).
 - **The client comes from the block's own header cell** (`ADANI` / `MHI` / `RIL` beside `SL.No`), not the tab name — for HSD's tabs. For May–Nov 2025 the `L&T MHI Progress` tab holds blocks headed `RIL`, identical to the RIL tab; reading the client from the tab counted that steel twice (2,427 MT of final coat). A mismatch is warned on every sync. The sync then merges tabs by key, preferring the client's own tab on disagreement.
 - Each block also carries columns for the first days of the next month. **A block's own month wins** for a given date; a trailing column is used only if no block covers that date as its own month; disagreeing duplicates are warned (RIL's January block labels its trailing columns 02-02 / 02-03 with figures that differ from February's).
 - An increment ≥90% of the cumulative (and ≥50) is rejected as a mid-edit artefact — but only once the stage already has a running total it continues from, so day one of tracking (and the day after a genuine reset) is kept.
@@ -359,7 +359,7 @@ Each date occupies **two** columns: a running cumulative and that day's incremen
 
 Skips "Vehicle Plan / Actual" blocks entirely — those are vehicle counts, not MT, and planned vehicles for a future date are not dispatch that happened (reported as an `info` note, not a warning).
 
-- **Business unit comes from each block's title** in the row above its header ("HSD - … Dispatch Summary" / "Bhilai - … (AMNS & Utility Bridge)"). Bhilai blocks are interleaved in the same tab; before Sep 2026 their 197 MT was summed into HSD. Records are tagged `businessUnit`; HSD queries use `businessUnit: { $ne: 'BU' }` so untagged legacy rows still count as HSD. The Bhilai view shows its own dispatch.
+- **Business unit comes from each block's title** in the row above its header ("HSD - … Dispatch Summary" / "Bhilai - … (AMNS & Utility Bridge)"). **The sheet carries Bhilai blocks for February, March and April 2026 only** — April's is a title with no figures, and from May every block is HSD's. So Bhilai dispatch genuinely ends on 21 Mar 2026 (12 rows); the empty dispatch cards on the Bhilai view are the sheet, not the parser, and nothing is borrowed from HSD to fill them. Bhilai blocks are interleaved in the same tab; before Sep 2026 their 197 MT was summed into HSD. Records are tagged `businessUnit`; HSD queries use `businessUnit: { $ne: 'BU' }` so untagged legacy rows still count as HSD. The Bhilai view shows its own dispatch.
 - Aggregate rows: `Total`, `Grand Total`, `Sub-Total`, `G. Total`. Numbers typed as text and negative quantities are warned, not silently dropped.
 
 ### 7.5 `synopsisParser.js`
@@ -544,7 +544,7 @@ Reconstructed from the commit history; useful for understanding why things are s
 
 **Stage 6 — Dispatch Synopsis (7–9 Sep).** `Synopsis dispach added` → `custom range` → `renamed to dispatch synopsis`. New parser, two models, folder-based sync, a full chart suite, then per-month and custom-range filtering with pro-rated plan.
 
-**Stage 8 — Bhilai production (Oct 2026).** Bhilai stopped being manpower-and-dispatch-only: its three progress tabs are read exactly as HSD's, with the client taken from the tab because every block heading names an HSD client. `businessUnit` joined `ProductionRecord`'s key, and production cleanup became per plant.
+**Stage 8 — Bhilai production (Oct 2026).** Bhilai stopped being manpower-and-dispatch-only: `Bhilai MHI Duct Progress` is read exactly as HSD's tabs are, with the client taken from the tab because its blocks are headed with HSD's client name. `businessUnit` joined `ProductionRecord`'s key, and production cleanup became per plant. Two incidents came out of it, both recorded in the code: the sync skipped the unchanged workbook so new tabs were never read (now a manual run always re-reads, and a build signature forces a scheduled one), and the new key stopped matching rows written before it, inserting a duplicate of every HSD row until the filter was widened.
 
 **Stage 7 — Manpower correctness (9 Sep).** `manpower fixed`, `fixing manpower on site`. The three rules in §7.2, the half-shift weighting, and `check:manpower`.
 

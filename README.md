@@ -46,12 +46,12 @@ The consequence shapes the whole codebase: the source of truth is a spreadsheet 
 ### Production Synopsis
 Production by process stage (cutting → fit-up → welding → visual → blasting → final coat), dispatch by client, and manpower by category and shift — for both business units, HSD and Bhilai. Everything filters by date range (presets or a custom calendar range), by business unit and by client. Charts expand into a modal for a closer look.
 
-Both plants have all three sources. Bhilai reads its own three progress tabs (`Bhilai MHI Duct Progress`, `Utility Bridge - Bhilai`, `AMNS - Bhilai`) for clients MHI Duct, Utility Bridge and AMNS.
+Bhilai's production comes from one tab, `Bhilai MHI Duct Progress` (client **MHI Duct**), and nothing is merged into it from elsewhere. Its dispatch comes from the Bhilai-titled blocks in the Daily Dispatch tab, which the sheet stops writing after April 2026.
 
 Three details that matter for correctness:
 - **Manpower is weighted**: `Day + Night + ½ × 12.30`, because `12.30` is a half shift and counts as half a head.
 - **Production totals are summed from daily increments**, never derived from differences in the running cumulative — the cumulative genuinely falls sometimes, and those are real corrections.
-- **Bhilai's figures are kept apart from HSD's by plant, not by client name.** Every block in Bhilai's tabs is headed with an HSD client's name, left over from the sheet being copied; the tab decides the client, and the wrong heading is reported as a warning on every sync.
+- **Bhilai's figures are kept apart from HSD's by plant, not by client name.** Bhilai's blocks are headed with an HSD client's name, left over from the sheet being copied; the tab decides the client, and the wrong heading is reported as a warning on every sync.
 
 ### Dispatch Synopsis
 A second view, fed by a folder of one-workbook-per-month synopsis reports. It charts department-wise dispatch against plan: monthly plan vs actual, achievement against target, day-by-day tonnage by group, cumulative pace, share by group and by Inhouse/Job Work/Buyout, per-department performance, a department-by-month grid, and tower/pole counts. Filterable by month or a custom range, with the plan pro-rated across a partial range.

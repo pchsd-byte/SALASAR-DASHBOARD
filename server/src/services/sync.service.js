@@ -34,18 +34,20 @@ const sourceSignature = () =>
 
 // Every progress tab in the live workbook, and which plant it belongs to.
 //
-// Bhilai's three tabs are read exactly like HSD's, with one difference: `trustTabClient`. Each
-// of them carries blocks headed with an HSD client's name ("RIL", "AMNS", "MHI") because the
-// sheet was copied from HSD's and the headings were never corrected. Reading the client from
-// those headings — the right rule for HSD (§7.3) — would file Bhilai's tonnage under L&T MHI
-// and RIL. For these tabs the tab names the client, and the heading is reported as a warning.
+// Bhilai is the "Bhilai MHI Duct Progress" tab and nothing else — the plant's own instruction:
+// its section takes that tab's figures, with nothing merged in from elsewhere. The two older
+// tabs ("AMNS - Bhilai", "Utility Bridge - Bhilai") stopped being updated in March 2026 and
+// cover a different project; they are deliberately not read.
+//
+// It is read exactly like HSD's tabs, with one difference: `trustTabClient`. Its blocks are
+// headed "MHI" — copied from HSD's sheet and never corrected — and reading the client from that
+// heading (the right rule for HSD, §7.3) would file Bhilai's tonnage under HSD's L&T MHI. The
+// tab names the client, and the heading is reported as a warning.
 const PROGRESS_TABS = [
   { title: 'Adani Progress', client: 'Adani', businessUnit: 'HSD' },
   { title: 'L&T MHI Progress', client: 'L&T MHI', businessUnit: 'HSD' },
   { title: 'RIL Progress', client: 'RIL', businessUnit: 'HSD' },
   { title: 'Bhilai MHI Duct Progress', client: 'MHI Duct', businessUnit: 'BU', trustTabClient: true },
-  { title: 'Utility Bridge - Bhilai', client: 'Utility Bridge', businessUnit: 'BU', trustTabClient: true },
-  { title: 'AMNS - Bhilai', client: 'AMNS', businessUnit: 'BU', trustTabClient: true },
 ];
 
 const DISPATCH_TABS = ['Daily Dispatch'];
@@ -297,13 +299,21 @@ async function syncProductionTabs(workbook, log) {
   let deleted = 0;
   for (const unit of ['HSD', 'BU']) {
     const unitRecords = valid.filter((r) => r.businessUnit === unit);
-    if (unitRecords.length === 0) continue;
+    const label = unit === 'BU' ? 'Bhilai' : 'HSD';
+    if (unitRecords.length === 0) {
+      // Nothing parsed for this plant. If that is because its tabs could not be read, say so
+      // next to the error about the tab itself — a run must never leave "and therefore nothing
+      // was tidied" to be inferred. (Bhilai reads one tab, so losing it means reading nothing.)
+      if (!unitFullyRead[unit]) {
+        note(log, 'Production', `No ${label} progress tab could be read this run, so the ${label} production figures already stored were kept and no old ${label} production records were removed.`, 'warning');
+      }
+      continue;
+    }
 
     const times = unitRecords.map((r) => r.date.getTime());
     const span = { $gte: new Date(Math.min(...times)), $lte: new Date(Math.max(...times)) };
     const unitQuery = unit === 'BU' ? { businessUnit: 'BU' } : { businessUnit: { $ne: 'BU' } };
     const storedBefore = await ProductionRecord.countDocuments({ date: span, ...unitQuery });
-    const label = unit === 'BU' ? 'Bhilai' : 'HSD';
 
     if (!unitFullyRead[unit]) {
       note(log, 'Production', `Not every ${label} progress tab could be read this run, so no old ${label} production records were removed.`, 'warning');

@@ -59,9 +59,9 @@ function liveTabs(overrides = {}) {
       ...progressBlock('MHI', ['2025-12-01', '2025-12-02', '2025-12-03'], [{ label: 'Final Coat', pairs: [[0, 0], [7, 7], [9, 2]] }]),
     ],
     'RIL Progress': rilBlock(),
-    // Bhilai's three progress tabs, in the shape the live workbook actually has: every block
-    // is headed with an HSD client's name, left over from the sheet being copied. The client
-    // must come from the tab, or Bhilai's tonnage lands on HSD's clients.
+    // Bhilai's tabs as the live workbook has them. Only "Bhilai MHI Duct Progress" is read —
+    // the other two stopped in March 2026 and cover a different project — and its blocks are
+    // headed with an HSD client's name, so the client must come from the tab.
     'Bhilai MHI Duct Progress': progressBlock('MHI', ['2026-08-01', '2026-08-02', '2026-08-03'], [
       { label: 'Cutting', pairs: [[4, 4], [9, 5], [15, 6]] },
       { label: 'Final Coat', pairs: [[1, 1], [3, 2], [6, 3]] },
@@ -156,7 +156,9 @@ describe('sync', () => {
     const baseline = await counts();
     // Production: HSD's Adani 6, L&T MHI 6, RIL 3 — plus Bhilai's MHI Duct 6, Utility Bridge 3,
     // AMNS 3, which are separate records even where they name the same client on the same day.
-    assert.deepEqual(baseline, { manpower: 18, production: (6 + 6 + 3) + (6 + 3 + 3), dispatch: 10, months: 2, synopsis: 10 });
+    // Production: HSD's Adani 6, L&T MHI 6, RIL 3 — plus Bhilai's MHI Duct 6. The AMNS and
+    // Utility Bridge tabs are in the fixture but deliberately not read.
+    assert.deepEqual(baseline, { manpower: 18, production: (6 + 6 + 3) + 6, dispatch: 10, months: 2, synopsis: 10 });
     for (let i = 0; i < 9; i += 1) await runSync('cron', sources());
     assert.deepEqual(await counts(), baseline);
   });
@@ -227,7 +229,7 @@ describe('sync', () => {
     assert.equal(log.status, 'partial');
     assert.ok(errors(log).some((i) => i.tab === 'Manpower'));
     const c = await counts();
-    assert.equal(c.production, 27);
+    assert.equal(c.production, 21);
     assert.equal(c.dispatch, 10);
     assert.equal(c.months, 2);
   });
@@ -509,28 +511,34 @@ describe('Bhilai production', () => {
     const bhilai = await ProductionRecord.find({ businessUnit: 'BU' }).lean();
 
     assert.deepEqual(
-      [...new Set(bhilai.map((r) => r.client))].sort(),
-      ['AMNS', 'MHI Duct', 'Utility Bridge'],
-      'the tab names the client; "MHI" and "RIL" in the headings are leftovers',
+      [...new Set(bhilai.map((r) => r.client))],
+      ['MHI Duct'],
+      'the tab names the client; "MHI" in the heading is a leftover',
     );
-    assert.equal(bhilai.length, 12);
+    assert.equal(bhilai.length, 6);
+    assert.ok(bhilai.every((r) => r.sourceTab === 'Bhilai MHI Duct Progress'), 'and nothing else feeds Bhilai');
   });
 
-  test('a Bhilai block headed with an HSD client does not touch that client’s figures', async () => {
+  test('the "MHI" heading does not put Bhilai’s figures on HSD’s L&T MHI', async () => {
     await runSync('manual', sources());
 
-    // "Utility Bridge - Bhilai" is headed "RIL" and carries final coat on the same dates as the
-    // real RIL tab. If the heading were trusted, or the key left businessUnit out, one of them
-    // would overwrite the other.
-    const hsdRil = await ProductionRecord.find({ client: 'RIL', businessUnit: { $ne: 'BU' } }).lean();
-    assert.ok(hsdRil.length > 0, 'HSD still has its own RIL records');
-    assert.equal(await ProductionRecord.countDocuments({ client: 'RIL', businessUnit: 'BU' }), 0);
-    assert.ok(hsdRil.every((r) => r.sourceTab !== 'Utility Bridge - Bhilai'));
+    const hsdMhi = await ProductionRecord.find({ client: 'L&T MHI', businessUnit: { $ne: 'BU' } }).lean();
+    assert.ok(hsdMhi.length > 0, 'HSD still has its own L&T MHI records');
+    assert.ok(hsdMhi.every((r) => r.sourceTab !== 'Bhilai MHI Duct Progress'), 'none of them came from Bhilai’s tab');
+    assert.equal(await ProductionRecord.countDocuments({ client: 'L&T MHI', businessUnit: 'BU' }), 0);
 
     const warned = (await SyncLog.findOne().sort({ startedAt: -1 }).lean()).issues
-      .filter((i) => i.tab === 'Utility Bridge - Bhilai')
+      .filter((i) => i.tab === 'Bhilai MHI Duct Progress')
       .map((i) => i.message);
-    assert.ok(warned.some((m) => /headed "RIL".*recorded under Utility Bridge/s.test(m)), 'and the sheet’s wrong heading is reported');
+    assert.ok(warned.some((m) => /headed "MHI".*recorded under MHI Duct/s.test(m)), 'and the sheet’s wrong heading is reported');
+  });
+
+  test('the two tabs that stopped in March are deliberately not read', async () => {
+    await runSync('manual', sources());
+    for (const tab of ['AMNS - Bhilai', 'Utility Bridge - Bhilai']) {
+      assert.equal(await ProductionRecord.countDocuments({ sourceTab: tab }), 0, `${tab} is not a source`);
+    }
+    assert.equal(await ProductionRecord.countDocuments({ businessUnit: 'BU', client: { $in: ['AMNS', 'Utility Bridge'] } }), 0);
   });
 
   test('the two plants are summed separately', async () => {
@@ -541,8 +549,8 @@ describe('Bhilai production', () => {
 
     assert.ok(hsd > 0 && bu > 0);
     assert.equal(hsd + bu, all, 'every record belongs to exactly one plant');
-    // Bhilai's own final coat: MHI Duct 6 + Utility Bridge 9 + AMNS 35.
-    assert.equal(await sumIncrements({ businessUnit: 'BU', processStage: 'finalCoat' }), 6 + 9 + 35);
+    // Bhilai's own final coat comes from the MHI Duct tab alone.
+    assert.equal(await sumIncrements({ businessUnit: 'BU', processStage: 'finalCoat' }), 6);
   });
 
   test('the dashboard serves Bhilai production instead of "unavailable"', async () => {
@@ -551,11 +559,11 @@ describe('Bhilai production', () => {
 
     const bu = await buildHsdSummaryData(...range, 'BU');
     assert.equal(bu.production.available, true, 'Bhilai is no longer an unavailable source');
-    assert.equal(bu.production.completedInRange, 6 + 9 + 35);
-    assert.deepEqual([...new Set(bu.production.byClient.map((c) => c.client))].sort(), ['AMNS', 'MHI Duct', 'Utility Bridge']);
+    assert.equal(bu.production.completedInRange, 6);
+    assert.deepEqual([...new Set(bu.production.byClient.map((c) => c.client))], ['MHI Duct']);
 
     const hsd = await buildHsdSummaryData(...range, 'HSD');
-    assert.ok(hsd.production.byClient.every((c) => !['AMNS', 'MHI Duct', 'Utility Bridge'].includes(c.client)), 'HSD shows none of Bhilai’s clients');
+    assert.ok(hsd.production.byClient.every((c) => c.client !== 'MHI Duct'), 'HSD shows none of Bhilai’s clients');
     assert.notEqual(hsd.production.completedInRange, bu.production.completedInRange);
   });
 
@@ -563,14 +571,14 @@ describe('Bhilai production', () => {
     await runSync('manual', sources());
     const before = await ProductionRecord.countDocuments({ businessUnit: 'BU' });
 
-    // Somebody renames a tab in the sheet. Bhilai's stored figures must survive — they are not
-    // "rows the sheet no longer contains", they are rows this run could not read.
+    // Somebody renames Bhilai's tab in the sheet. Bhilai's stored figures must survive — they
+    // are not "rows the sheet no longer contains", they are rows this run could not read.
     const tabs = liveTabs();
-    delete tabs['AMNS - Bhilai'];
+    delete tabs['Bhilai MHI Duct Progress'];
     const log = await runSync('manual', sources({ tabs }));
 
     assert.equal(await ProductionRecord.countDocuments({ businessUnit: 'BU' }), before, 'nothing of Bhilai was deleted');
-    assert.ok(errors(log).some((i) => i.tab === 'AMNS - Bhilai' && /renamed or removed/.test(i.message)));
+    assert.ok(errors(log).some((i) => i.tab === 'Bhilai MHI Duct Progress' && /renamed or removed/.test(i.message)));
     assert.ok(log.issues.some((i) => /no old Bhilai production records were removed/.test(i.message)));
     assert.ok(!log.issues.some((i) => /no old HSD production records were removed/.test(i.message)), 'HSD is judged on its own tabs');
   });
