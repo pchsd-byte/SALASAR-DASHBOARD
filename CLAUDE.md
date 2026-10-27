@@ -185,7 +185,7 @@ No TypeScript, no test framework (tests use Node's built-in `node:test`; the onl
 │       ├── lib/{api.js,sections.js}
 │       ├── pages/{Dashboard,Login,Settings,Email,Profile}.jsx
 │       └── components/
-│           ├── layout/{Navbar,ProtectedRoute,Avatar}.jsx
+│           ├── layout/{Navbar,ProtectedRoute,Avatar,WelcomeBlessing}.jsx
 │           ├── settings/TeamAccessPanel.jsx   # admin: add people, tick sections
 │           ├── email/{EmailComposer.jsx,emailTemplates.js,
 │           │          ImageReportBuilder.jsx}   # "Create Image Reports": pasted screenshots
@@ -221,7 +221,7 @@ All under `/api`. Every route except `/health`, `/health/deep`, `/auth/google*`,
 |---|---|---|---|
 | GET | `/health` | — | Liveness. Also the keep-alive target. Deliberately trivial. |
 | GET | `/health/deep` | — | 503 when MongoDB is disconnected. |
-| GET | `/auth/google` → `/auth/google/callback` | — | Login (online grant). |
+| GET | `/auth/google` → `/auth/google/callback` | — | Login (online grant). Lands on `/?welcome=1` (§5.5). |
 | GET | `/auth/me` | auth | Current user: role, title, sections, `emailSender`, chosen `avatar`, `lastLoginAt`. |
 | PATCH | `/auth/me/avatar` | auth | Your own picture. The account comes from the session, never the body. |
 | POST | `/auth/logout` | — | Clears the cookie. |
@@ -273,6 +273,36 @@ downscales an upload to 128×128 JPEG before it is sent** — a 3.5 MB phone pho
 The server caps it at 48 KB and refuses anything larger, because this value rides along with
 `/auth/me` on every page load and bandwidth is metered (§8.6). Name, email and role are not
 editable: they come from Google and from what an admin granted.
+
+### 5.5 The sign-in blessing — `components/layout/WelcomeBlessing.jsx`
+
+A three-second Saraswati vandana over the whole screen on the way in: the mantra, the picture,
+the couplet, flowers falling, a gold torana frame. Escape or a click skips it.
+
+**It plays on a fresh sign-in only.** The login callback redirects to `/?welcome=1` and the
+component reads that flag when the app mounts, then strips it from the URL. Keyed on anything
+else — "signed in and the dashboard is loading", say — it would play on every reload, and a
+reload is how everyone refreshes the figures (§8.2). It is rendered **outside `<Routes>`** for the
+same reason the flag is read at mount: a coordinator with only the Email section is redirected off
+`/`, and a redirect drops the query string.
+
+The surround is derived from the picture, not invented: its own tones are pearl white over warm
+rose-grey with a cream halo (mean R−B +15), so the backdrop is a warm ivory glow its soft edges
+dissolve into, and the frame is gold with Salasar's red `#dc1f2b` — the mark's own red, which is
+also the auspicious colour here.
+
+`public/saraswati.webp` is the supplied artwork with its cloud background taken off. It was done
+once, offline, by `docs/saraswati-cutout.py` (kept so the cut can be redone if the artwork is ever
+replaced — it is not part of any build): a flood grown inwards from the border across pixels that
+are both flat and close in colour, blocked by a hand-placed core over her crown, body, the lotus,
+the veena and the swan. Without that core the flood walks out of the cloud into her white silk — they are the same
+grey — and eats the lotus. It is served by **Vercel, not Render**, so it is not on the metered
+budget in §8.6.
+
+**Devanagari is never letter-spaced** here: tracking pulls matras and conjuncts off their
+consonants. The font stack is local only (`Noto Serif Devanagari`, `Nirmala UI`, `Mangal`) — the
+app loads no web fonts, and a blessing waiting on a font request is one nobody sees inside three
+seconds.
 
 ### 5.3 Design tokens — `client/src/index.css`
 

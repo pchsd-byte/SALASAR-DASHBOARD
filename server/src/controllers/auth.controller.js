@@ -152,7 +152,10 @@ export async function handleGoogleLoginCallback(req, res) {
     await AccessRequest.deleteOne({ email });
 
     issueSessionCookie(req, res, user);
-    res.redirect(env.clientOrigin);
+    // `welcome` is what tells the client this is a fresh sign-in rather than any other arrival at
+    // the dashboard, so the blessing plays once on the way in and not on every reload — and a
+    // reload is how people refresh the figures (§8.2). The client strips it from the URL.
+    res.redirect(`${env.clientOrigin}/?welcome=1`);
   } catch (err) {
     console.error('[auth] Google login failed:', err.message);
     res.redirect(`${env.clientOrigin}/login?error=login_failed`);

@@ -172,6 +172,8 @@ Two rules protect the setup:
 
 **Nobody gets in unnamed.** There is no domain rule: any Google account — a personal address or a colleague's work address — is refused until an admin adds it. A refused sign-in lands on a page explaining that access is granted by name, and is recorded as a request the admin can grant or dismiss from **Waiting for access** at the top of the people list.
 
+**Signing in opens with a blessing.** Straight after Google sends you back, a three-second vandana to Maa Saraswati plays over the screen — `ॐ ऐं सरस्वत्यै नमः`, the couplet, flowers falling, in a gold frame in Salasar's own red. It appears on sign-in only, never on a reload, and a click or Escape skips it.
+
 **Everyone has a profile page.** Clicking your name or picture in the top corner opens **Your profile**: your job title and access level, when you were last here, and **all three sections listed — the ones you have and the ones you do not**, because the section somebody is missing is usually the one they came to ask about. It is also where you set your picture: your Google photo, your initials on one of the dashboard's colours, or one you upload (shrunk in your browser before it is sent, so a photo straight off a phone is fine). Name, email and access come from Google and from your admin, and cannot be changed here.
 
 **Email is a section, not a person.** Several process coordinators can compose and send; what stays with `EMAIL_USER` is the Gmail authorisation — every report leaves from that one mailbox whoever wrote it. Admins are not given Email automatically: the composer and its send queue belong to the people who write the reports. Tick it for an admin who writes them too.
@@ -380,6 +382,7 @@ These are **spreadsheet** problems. The app reports them; it never invents corre
 | **9 — Bandwidth** | Daily sync, conditional downloads, caching, compression, no polling |
 | **10 — People and access** | Sections and roles, managed from Settings instead of environment variables |
 | **11 — Your profile** | A page of your own: what you may open, and a picture you choose |
+| **12 — The welcome blessing** | A three-second Saraswati vandana on the way in, in Hindi |
 
 **The pattern worth noticing:** every stage after deployment has been about the *source data* or the *deployment environment*, not application features. Expect the next problem to be one of those two as well.
 
