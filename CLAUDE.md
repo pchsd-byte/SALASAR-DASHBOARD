@@ -299,6 +299,25 @@ the veena and the swan. Without that core the flood walks out of the cloud into 
 grey — and eats the lotus. It is served by **Vercel, not Render**, so it is not on the metered
 budget in §8.6.
 
+**Two layouts, chosen by the shape of the screen** (the `<style>` block in the component — media
+queries, which inline styles cannot express):
+
+| Screen | Layout | Why |
+|---|---|---|
+| Portrait, and landscape taller than 920px (monitors) | Poster — mantra over her, couplet under | The traditional framed-picture shape, and tall screens have the height for it |
+| Landscape 920px tall or shorter (phones turned sideways, 16:9 laptops) | She takes the left, every word sits beside her | A portrait frame on a 1366×768 laptop has to shrink to fit the height and then fights the shape of the screen |
+
+Two things that are easy to undo by accident:
+
+- **Every size is bounded by the viewport's height as well as its width** (`min(72vw, 52vh)`, not
+  `72vw`). Sized on width alone the frame came out 605px tall on a 390px-tall landscape phone and
+  hung off both ends. Checked from 280×653 up to 3440×1440.
+- In the wide layout the words are a **flex child, not two grid rows with the picture spanning
+  both**: a spanning item inflates content-sized tracks, which pushed the mantra and the couplet
+  to opposite ends of her with a hole between them. The frame is `width: fit-content` for the same
+  family of reason — at 100% it stretched to its cap and left a band of empty ivory down both
+  sides on a monitor.
+
 **Devanagari is never letter-spaced** here: tracking pulls matras and conjuncts off their
 consonants. The font stack is local only (`Noto Serif Devanagari`, `Nirmala UI`, `Mangal`) — the
 app loads no web fonts, and a blessing waiting on a font request is one nobody sees inside three

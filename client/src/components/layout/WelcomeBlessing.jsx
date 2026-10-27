@@ -112,7 +112,7 @@ function Rosette({ size = 16 }) {
 // frame's gold and carries the brand red in its drops.
 function Torana() {
   return (
-    <svg viewBox="0 0 400 46" className="block w-full" style={{ height: 'clamp(26px, 4vw, 40px)' }} aria-hidden="true" preserveAspectRatio="none">
+    <svg viewBox="0 0 400 46" className="sb-torana block w-full" style={{ height: 'clamp(20px, min(4vw, 3.4vh), 40px)' }} aria-hidden="true" preserveAspectRatio="none">
       <path d="M0 2h400" stroke={GOLD} strokeWidth="2.5" fill="none" />
       {Array.from({ length: 17 }, (_, i) => {
         const x = 12 + i * 23.5;
@@ -181,6 +181,67 @@ export function WelcomeBlessing() {
               .sb-petal { display: none; }
               .sb-glow  { animation: none; opacity: 0.7; }
             }
+
+            /* Every size below is bounded by the viewport's HEIGHT as well as its width. Sized on
+               width alone, the frame came out 605px tall on a 390px-tall landscape phone and hung
+               off both ends of the screen. min(vw, vh) is what keeps it on screen on a laptop in
+               a short window as much as on a phone turned sideways. */
+            /* fit-content, not 100%: the frame hugs whichever is wider, the picture or the couplet,
+               instead of stretching to its cap and leaving a band of empty ivory down both sides
+               on a monitor. */
+            .sb-card    { width: fit-content; max-width: min(660px, 94vw); max-height: 94vh; }
+            .sb-body    { display: grid; grid-template-areas: "mantra" "art" "words"; justify-items: center; }
+            /* Stacked, the wrapper is not a box at all - its two children become grid items in
+               their own right, so the areas above put the mantra over her and the couplet under
+               her however the markup happens to be ordered. */
+            .sb-side    { display: contents; }
+            .sb-head    { grid-area: mantra; }
+            .sb-art     { grid-area: art; }
+            .sb-words   { grid-area: words; }
+            .sb-art     { width: clamp(188px, min(72vw, 52vh), 500px); }
+            .sb-mantra  { font-size: clamp(17px, min(4.6vw, 3.6vh), 29px); }
+            .sb-couplet { font-size: clamp(11px, min(3vw, 2.15vh), 16.5px); }
+            .sb-foot    { font-size: clamp(9px, min(2.3vw, 1.65vh), 12.5px); }
+            .sb-rule    { width: clamp(34px, 9vw, 84px); }
+            /* Centred under the mantra when stacked; flush left when it sits beside her. */
+            .sb-headrule { justify-content: center; }
+
+            /* Laptops and monitors. A 620px frame centred on a 1920 or 2560 screen reads as a
+               notification rather than an occasion, and these screens have the height to spare
+               that a 768px laptop does not — which is why this is gated on height too, and why a
+               1366x768 laptop stays on the sizes above. */
+            @media (min-width: 1200px) and (min-height: 820px) {
+              .sb-card    { max-width: min(860px, 72vw); }
+              .sb-art     { width: clamp(320px, min(42vw, 52vh), 620px); }
+              .sb-mantra  { font-size: clamp(26px, min(2.6vw, 3.6vh), 42px); }
+              .sb-couplet { font-size: clamp(15px, min(1.45vw, 2vh), 23px); }
+              .sb-foot    { font-size: clamp(11px, min(1vw, 1.4vh), 16px); }
+              .sb-rule    { width: clamp(60px, 7vw, 130px); }
+            }
+
+            /* Wide and not tall: a phone turned sideways, and equally a 16:9 laptop. A portrait
+               frame on a 1366x768 screen has to shrink to fit the height and then fights the
+               shape of the screen, so beyond this point she takes the left and everything that is
+               words goes beside her. Tall monitors (1050px and up) keep the poster. */
+            @media (orientation: landscape) and (max-height: 920px) {
+              .sb-card  { max-width: min(1080px, 92vw); }
+              /* Plain flex here, not a two-row grid with the picture spanning both: a spanning
+                 item inflates content-sized tracks, so the mantra and the couplet were pushed to
+                 opposite ends of her with a hole between them. The wrapper becomes a real box and
+                 centres the words against her as one group. */
+              .sb-body  { display: flex; align-items: center; text-align: left;
+                          gap: clamp(10px, 2.5vw, 34px); }
+              .sb-side  { display: flex; flex-direction: column; justify-content: center;
+                          flex: 1 1 auto; min-width: 0; gap: clamp(4px, 1.8vh, 18px); }
+              /* One formula covers a 390px-tall phone and a 768px-tall laptop. */
+              .sb-art   { width: min(38vw, 68vh); flex: none; }
+              .sb-mantra  { font-size: clamp(15px, min(2.4vw, 4.6vh), 40px); }
+              .sb-couplet { font-size: clamp(10.5px, min(1.45vw, 2.6vh), 22px); }
+              .sb-foot    { font-size: clamp(8.5px, min(1vw, 1.9vh), 15px); }
+              .sb-rule    { width: clamp(26px, 5vw, 110px); }
+              .sb-headrule { justify-content: flex-start; }
+              .sb-torana  { height: clamp(16px, min(3vw, 4.4vh), 34px) !important; }
+            }
           `}</style>
 
           {/* Flowers thrown over the whole view, behind the frame. */}
@@ -192,12 +253,11 @@ export function WelcomeBlessing() {
             initial={{ scale: 0.9, y: 18 }}
             animate={{ scale: 1, y: 0 }}
             transition={{ duration: 0.55, ease: [0.2, 0.8, 0.25, 1] }}
-            className="relative w-full"
-            style={{ maxWidth: 'min(620px, 94vw)' }}
+            className="sb-card relative"
           >
             {/* The frame: a gold double rule on warm ivory, the picture's own ground. */}
             <div
-              className="relative overflow-hidden rounded-[22px] px-4 pb-3 pt-0 text-center sm:px-6"
+              className="relative overflow-hidden rounded-[22px] px-3 pb-3 pt-0 text-center sm:px-6"
               style={{
                 background: 'linear-gradient(170deg, #fffdf6 0%, #fdf4e7 42%, #f7e6dd 100%)',
                 border: `1.5px solid ${GOLD}`,
@@ -206,54 +266,59 @@ export function WelcomeBlessing() {
             >
               <Torana />
 
-              {/* ॐ ऐं सरस्वत्यै नमः */}
-              <div
-                className="mt-1"
-                style={{ fontFamily: DEVANAGARI, color: BRAND_RED, fontSize: 'clamp(19px, 4.2vw, 27px)', fontWeight: 700, textShadow: '0 1px 0 rgba(255,255,255,0.9), 0 0 18px rgba(240,217,138,0.95)' }}
-              >
-                {MANTRA}
-              </div>
+              <div className="sb-body">
+                {/* Her. The glow sits behind so the cut-out's soft edge has somewhere to go. */}
+                <div className="sb-art relative mt-0.5">
+                  <div
+                    className="sb-glow pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                    aria-hidden="true"
+                    style={{ width: '122%', height: '122%', background: 'radial-gradient(circle, rgba(255,240,190,0.95) 0%, rgba(255,226,170,0.5) 42%, rgba(255,226,170,0) 70%)' }}
+                  />
+                  <img
+                    src="/saraswati.webp"
+                    alt="माँ सरस्वती"
+                    className="relative block w-full"
+                    style={{ filter: 'drop-shadow(0 10px 22px rgba(120,70,50,0.28))' }}
+                  />
+                </div>
 
-              <div className="mx-auto mt-1.5 flex items-center justify-center gap-2" aria-hidden="true">
-                <span className="h-px w-14 sm:w-20" style={{ background: `linear-gradient(90deg, transparent, ${GOLD})` }} />
-                <Rosette size={15} />
-                <span className="h-px w-14 sm:w-20" style={{ background: `linear-gradient(90deg, ${GOLD}, transparent)` }} />
-              </div>
+                <div className="sb-side">
+                <div className="sb-head w-full">
+                  {/* ॐ ऐं सरस्वत्यै नमः */}
+                  <div
+                    className="sb-mantra mt-1 leading-tight"
+                    style={{ fontFamily: DEVANAGARI, color: BRAND_RED, fontWeight: 700, textShadow: '0 1px 0 rgba(255,255,255,0.9), 0 0 18px rgba(240,217,138,0.95)' }}
+                  >
+                    {MANTRA}
+                  </div>
+                  <div className="sb-headrule mt-1.5 flex items-center gap-2" aria-hidden="true">
+                    <span className="sb-rule h-px" style={{ background: `linear-gradient(90deg, transparent, ${GOLD})` }} />
+                    <Rosette size={14} />
+                    <span className="sb-rule h-px" style={{ background: `linear-gradient(90deg, ${GOLD}, transparent)` }} />
+                  </div>
+                </div>
 
-              {/* Her. The glow sits behind so the cut-out's soft edge has somewhere to go. */}
-              <div className="relative mx-auto mt-0.5" style={{ width: 'clamp(226px, 68vw, 396px)' }}>
-                <div
-                  className="sb-glow pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
-                  aria-hidden="true"
-                  style={{ width: '122%', height: '122%', background: 'radial-gradient(circle, rgba(255,240,190,0.95) 0%, rgba(255,226,170,0.5) 42%, rgba(255,226,170,0) 70%)' }}
-                />
-                <img
-                  src="/saraswati.webp"
-                  alt="माँ सरस्वती"
-                  className="relative block w-full"
-                  style={{ filter: 'drop-shadow(0 10px 22px rgba(120,70,50,0.28))' }}
-                />
-              </div>
 
-              {/* अज्ञानता का अंधेरा मिट जाए… */}
-              <div
-                className="mx-auto -mt-1 max-w-[30rem] leading-relaxed"
-                style={{ fontFamily: DEVANAGARI, color: '#6d2230', fontSize: 'clamp(12px, 2.8vw, 15.5px)', fontWeight: 600 }}
-              >
-                {COUPLET.map((line) => <div key={line}>{line}</div>)}
-              </div>
+                <div className="sb-words w-full">
+                  {/* अज्ञानता का अंधेरा मिट जाए… */}
+                  <div
+                    className="sb-couplet leading-relaxed"
+                    style={{ fontFamily: DEVANAGARI, color: '#6d2230', fontWeight: 600 }}
+                  >
+                    {COUPLET.map((line) => <div key={line}>{line}</div>)}
+                  </div>
 
-              {/* The foot of the frame, and the house it belongs to. */}
-              <div className="mt-2.5 flex items-center justify-center gap-2" aria-hidden="true">
-                <span className="h-px flex-1" style={{ background: `linear-gradient(90deg, transparent, ${GOLD})` }} />
-                <Rosette size={13} />
-                <span className="h-px flex-1" style={{ background: `linear-gradient(90deg, ${GOLD}, transparent)` }} />
-              </div>
-              <div
-                className="mt-1.5 text-[11px] font-semibold sm:text-xs"
-                style={{ fontFamily: DEVANAGARI, color: '#9a6a4e' }}
-              >
-                सलासार टेक्नो इंजीनियरिंग · एच.एस.डी.
+                  {/* The foot of the frame, and the house it belongs to. */}
+                  <div className="mt-2 flex items-center gap-2" aria-hidden="true">
+                    <span className="h-px flex-1" style={{ background: `linear-gradient(90deg, transparent, ${GOLD})` }} />
+                    <Rosette size={12} />
+                    <span className="h-px flex-1" style={{ background: `linear-gradient(90deg, ${GOLD}, transparent)` }} />
+                  </div>
+                  <div className="sb-foot mt-1.5 font-semibold" style={{ fontFamily: DEVANAGARI, color: '#9a6a4e' }}>
+                    सलासार टेक्नो इंजीनियरिंग · एच.एस.डी.
+                  </div>
+                </div>
+                </div>
               </div>
             </div>
           </motion.div>
