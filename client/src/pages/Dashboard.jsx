@@ -11,7 +11,9 @@ import { DispatchTrendChart, DispatchClientChart } from '../components/dashboard
 import { InsightsPanel } from '../components/dashboard/InsightsPanel';
 import { SyncStatusBadge } from '../components/dashboard/SyncStatusBadge';
 import { SynopsisView } from '../components/dashboard/SynopsisView';
+import { StaleDataOverlay } from '../components/dashboard/StaleDataOverlay';
 import { ErrorBoundary } from '../components/layout/ErrorBoundary';
+import { useAuth } from '../context/AuthContext';
 
 const UNIT_LABEL = { HSD: 'HSD', BU: 'Bhilai' };
 
@@ -47,6 +49,8 @@ export function Dashboard() {
   const [range, setRange] = useState(PRESETS[3].getRange());
   const [businessUnit, setBusinessUnit] = useState('HSD');
   const queryClient = useQueryClient();
+  // Only an admin can run a sync, so only an admin is offered the button in the overlay.
+  const { user } = useAuth();
 
   const params = {
     from: format(range.from, 'yyyy-MM-dd'),
@@ -110,6 +114,14 @@ export function Dashboard() {
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-6">
+      {/* The figures are frozen for the page session by design (§8.2), so how old they are is
+          worth saying out loud once — not in a line under the KPIs that nobody reads. Only when
+          the last successful sync is genuinely old; dismissible, and never while syncing. */}
+      <StaleDataOverlay
+        lastSyncedAt={syncStatusQuery.data?.lastSuccessfulSyncAt}
+        isAdmin={user?.role === 'admin'}
+        onSynced={handleSynced}
+      />
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
