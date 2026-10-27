@@ -8,6 +8,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Settings } from './pages/Settings';
 import { Email } from './pages/Email';
 import { AccessDenied } from './pages/AccessDenied';
+import { Profile } from './pages/Profile';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -29,6 +30,18 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            {/* Everyone signed in has a profile, whatever sections they were given — it is
+                where they find out what those sections are. */}
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <AppShell>
+                    <Profile />
+                  </AppShell>
+                </ProtectedRoute>
+              }
+            />
             {/* Public: the person has no session — the server turned their sign-in away and
                 passed the address along in the URL. */}
             <Route path="/access-denied" element={<AccessDenied />} />

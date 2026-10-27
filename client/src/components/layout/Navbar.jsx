@@ -1,11 +1,14 @@
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
+import { Avatar } from './Avatar';
 import { canOpen } from '../../lib/sections';
 
 // Every link is a section an admin grants in Settings → People and access. Settings is also
 // admin-only: being allowed to read the sync log is not the same as being allowed to change who
 // may sign in.
+const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--series-1)]';
+
 const links = [
   { to: '/', label: 'Dashboard', section: 'dashboard' },
   { to: '/settings', label: 'Settings', section: 'settings' },
@@ -59,7 +62,7 @@ export function Navbar() {
 
       {user && (
         <div className="flex items-center gap-3">
-          <div className="text-right leading-tight">
+          <NavLink to="/profile" className={`text-right leading-tight ${FOCUS_RING}`}>
             <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
               {user.name}
             </div>
@@ -68,12 +71,16 @@ export function Navbar() {
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {user.title || (user.role === 'admin' ? 'Admin' : 'Manager')}
             </div>
-          </div>
-          {user.picture ? (
-            <img src={user.picture} alt={user.name} className="h-8 w-8 rounded-full" referrerPolicy="no-referrer" />
-          ) : (
-            <div className="h-8 w-8 rounded-full" style={{ background: 'var(--series-3)' }} />
-          )}
+          </NavLink>
+          {/* The whole block is the way in to the profile: people reach for their own name and
+              picture when they want to know what they are allowed to do. */}
+          <NavLink
+            to="/profile"
+            aria-label="Your profile"
+            className={`rounded-full transition-transform hover:scale-105 ${FOCUS_RING}`}
+          >
+            <Avatar user={user} size={32} />
+          </NavLink>
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={logout}

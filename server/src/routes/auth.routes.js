@@ -10,6 +10,7 @@ import {
   redirectToGmailConnect,
   handleGmailConnectCallback,
   getGmailSendStatus,
+  updateMyAvatar,
 } from '../controllers/auth.controller.js';
 import { requireAuth, requireAdmin, requireEmail, requireSection } from '../middleware/auth.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -20,6 +21,9 @@ const router = Router();
 router.get('/google', redirectToGoogleLogin);
 router.get('/google/callback', asyncHandler(handleGoogleLoginCallback));
 router.get('/me', requireAuth, asyncHandler(getCurrentUser));
+// Anyone signed in may change their own picture — it is their account, and the id is taken from
+// the session rather than the request.
+router.patch('/me/avatar', requireAuth, asyncHandler(updateMyAvatar));
 router.post('/logout', logout);
 
 router.get('/google/connect-drive', requireAuth, requireAdmin, redirectToDriveConnect);

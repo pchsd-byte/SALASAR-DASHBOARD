@@ -183,9 +183,9 @@ No TypeScript, no test framework (tests use Node's built-in `node:test`; the onl
 │       ├── index.css           # design tokens (§5.3)
 │       ├── context/AuthContext.jsx
 │       ├── lib/{api.js,sections.js}
-│       ├── pages/{Dashboard,Login,Settings,Email}.jsx
+│       ├── pages/{Dashboard,Login,Settings,Email,Profile}.jsx
 │       └── components/
-│           ├── layout/{Navbar,ProtectedRoute}.jsx
+│           ├── layout/{Navbar,ProtectedRoute,Avatar}.jsx
 │           ├── settings/TeamAccessPanel.jsx   # admin: add people, tick sections
 │           ├── email/{EmailComposer.jsx,emailTemplates.js,
 │           │          ImageReportBuilder.jsx}   # "Create Image Reports": pasted screenshots
@@ -222,7 +222,8 @@ All under `/api`. Every route except `/health`, `/health/deep`, `/auth/google*`,
 | GET | `/health` | — | Liveness. Also the keep-alive target. Deliberately trivial. |
 | GET | `/health/deep` | — | 503 when MongoDB is disconnected. |
 | GET | `/auth/google` → `/auth/google/callback` | — | Login (online grant). |
-| GET | `/auth/me` | auth | Current user. |
+| GET | `/auth/me` | auth | Current user: role, title, sections, `emailSender`, chosen `avatar`, `lastLoginAt`. |
+| PATCH | `/auth/me/avatar` | auth | Your own picture. The account comes from the session, never the body. |
 | POST | `/auth/logout` | — | Clears the cookie. |
 | GET | `/auth/google/connect-drive[/callback]` | admin | Drive grant (offline). |
 | POST | `/auth/google/disconnect-drive` | admin | Deletes the stored token. |
@@ -247,10 +248,31 @@ All under `/api`. Every route except `/health`, `/health/deep`, `/auth/google*`,
 | `/` | authenticated | Dashboard — **Overview** / **Dispatch Synopsis** toggle. |
 | `/settings` | `section="settings"` | Two tabs for an admin — **People and access** (opens first; it is what they come here for) and **Google Drive sync**. A manager with only the section sees the Drive card alone. Returning from a Drive connection (`?driveConnect=`) opens the Drive tab. (There is no targets UI — `TargetPanel.jsx` is not rendered anywhere.) |
 | `/email` | `section="email"` | Report composer + scheduler. |
+| `/profile` | authenticated | **No section needed** — what this account is, what it may open, and the one thing it can change about itself (§5.4). |
 | `/access-denied` | **public** | Where a refused sign-in lands — `?email=&reason=not_allowed\|revoked`. No session exists, so the address comes in the URL. |
 | `/no-access` | authenticated | On the list, signed in, but no section ticked yet — same page, `variant="no_sections"`. |
 
 Routes and nav links are driven by the sections on `/auth/me` (`client/src/lib/sections.js`). **That gating is cosmetic: the server re-checks every request** with `requireSection(...)` — a manager without the `dashboard` section is refused the figures themselves, not merely the link. The old `PC_HSD_EMAIL` constant is gone; the Email page's "From" line now comes from `/auth/me`'s `emailSender`.
+
+### 5.4 The profile page — `pages/Profile.jsx`
+
+Reached from the navbar: both the name block and the avatar link to it, because people reach for
+their own name when they want to know what they are allowed to do. It answers the question an
+admin was otherwise answering by hand — *what am I allowed to open, and why is the page I was told
+about not in my nav?* — by listing **all three sections**, ticked or greyed, rather than only the
+ones granted. A section somebody does not have is the one they came to ask about.
+
+It needs no section of its own: everyone who can sign in has an account to look at. Everything it
+displays comes from `/auth/me`, which is the same answer `requireSection` enforces on the request
+itself, so the page cannot flatter anybody about their access.
+
+**The picture is the only thing it changes.** Three kinds, all drawn by `components/layout/Avatar.jsx`
+so the navbar and the page can never disagree: the Google photo, initials on one of the eight
+series colours (§5.3 — CSS variables, so they follow the theme), or an upload. **The browser
+downscales an upload to 128×128 JPEG before it is sent** — a 3.5 MB phone photo arrives as ~6 KB.
+The server caps it at 48 KB and refuses anything larger, because this value rides along with
+`/auth/me` on every page load and bandwidth is metered (§8.6). Name, email and role are not
+editable: they come from Google and from what an admin granted.
 
 ### 5.3 Design tokens — `client/src/index.css`
 

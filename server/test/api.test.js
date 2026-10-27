@@ -419,3 +419,83 @@ describe('nobody gets in unnamed', () => {
     assert.deepEqual(list.requests, []);
   });
 });
+
+// --- your own profile ---------------------------------------------------------------------------
+// The Profile page tells somebody what their account is and what it may open, and lets them change
+// their own picture. Everything it shows comes from /auth/me — the same answer the server enforces.
+
+describe('profile and avatar', () => {
+  // Somebody who is both on the access list and has signed in before — the only state in which
+  // the Profile page exists at all. A User row alone is not access: requireAuth asks
+  // resolveAccess, and an address nobody added is refused at the door.
+  const signedIn = async (email, { sections = ['dashboard'], title, ...extra } = {}) => {
+    await TeamMember.create({ email, role: 'manager', sections, title, active: true });
+    invalidateAccessCache();
+    const stored = await User.create({ googleId: `g-${email}`, email, name: 'Test Person', picture: 'https://lh3.google/photo', role: 'manager', ...extra });
+    return { cookie: cookieFor(email, { sub: stored._id.toString() }), stored };
+  };
+
+  test('/auth/me carries everything the page draws itself from', async () => {
+    const { cookie } = await signedIn('pc9@salasartechno.com', { sections: ['email'], title: 'Process Coordinator — Paint', lastLoginAt: new Date('2026-10-20T06:30:00Z') });
+
+    const me = await (await call('/auth/me', { cookie })).json();
+    assert.equal(me.role, 'manager');
+    assert.equal(me.title, 'Process Coordinator — Paint');
+    assert.deepEqual(me.sections, ['email']);
+    assert.deepEqual(me.avatar, { kind: 'google', colorIndex: 0, dataUrl: null }, 'the Google photo until they choose otherwise');
+    assert.ok(me.lastLoginAt, 'and when they were last here');
+  });
+
+  test('a person can set initials, upload a picture, and go back to Google', async () => {
+    const { cookie } = await signedIn('chooser@salasartechno.com');
+
+    let res = await call('/auth/me/avatar', { method: 'PATCH', cookie, body: { kind: 'initials', colorIndex: 5 } });
+    assert.equal(res.status, 200);
+    assert.deepEqual((await res.json()).avatar, { kind: 'initials', colorIndex: 5, dataUrl: null });
+
+    const tiny = `data:image/jpeg;base64,${Buffer.from('not really a jpeg but small').toString('base64')}`;
+    res = await call('/auth/me/avatar', { method: 'PATCH', cookie, body: { kind: 'photo', dataUrl: tiny } });
+    assert.equal(res.status, 200);
+    assert.equal((await (await call('/auth/me', { cookie })).json()).avatar.dataUrl, tiny, 'and it comes back with /auth/me');
+
+    res = await call('/auth/me/avatar', { method: 'PATCH', cookie, body: { kind: 'google' } });
+    assert.deepEqual((await res.json()).avatar, { kind: 'google', colorIndex: 0, dataUrl: null }, 'choosing Google clears the stored picture');
+  });
+
+  test('a picture too large for a payload sent on every page load is refused', async () => {
+    const { cookie } = await signedIn('big@salasartechno.com');
+    const huge = `data:image/png;base64,${'A'.repeat(90 * 1024)}`;
+    const res = await call('/auth/me/avatar', { method: 'PATCH', cookie, body: { kind: 'photo', dataUrl: huge } });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /over the 48 KB limit/);
+  });
+
+  test('nonsense is refused rather than stored', async () => {
+    const { cookie } = await signedIn('odd@salasartechno.com');
+    const cases = [
+      [{ kind: 'badge' }, /Choose a Google photo/],
+      [{ kind: 'initials', colorIndex: 99 }, /Pick one of the available colours/],
+      [{ kind: 'photo', dataUrl: 'https://example.com/me.png' }, /could not be read/],
+      [{ kind: 'photo', dataUrl: 'data:text/html;base64,PHNjcmlwdD4=' }, /could not be read/],
+    ];
+    for (const [body, expected] of cases) {
+      const res = await call('/auth/me/avatar', { method: 'PATCH', cookie, body });
+      assert.equal(res.status, 400, JSON.stringify(body));
+      assert.match((await res.json()).error, expected);
+    }
+  });
+
+  test('it is always your own account — the session decides, not the request', async () => {
+    const mine = await signedIn('mine@salasartechno.com');
+    const theirs = await signedIn('theirs@salasartechno.com');
+
+    await call('/auth/me/avatar', { method: 'PATCH', cookie: mine.cookie, body: { kind: 'initials', colorIndex: 3, email: 'theirs@salasartechno.com', _id: theirs.stored._id.toString() } });
+
+    assert.equal((await User.findById(mine.stored._id)).avatar.colorIndex, 3);
+    assert.equal((await User.findById(theirs.stored._id)).avatar.kind, 'google', 'the other account is untouched');
+  });
+
+  test('signing out is required to change anybody else — the endpoint needs a session', async () => {
+    assert.equal((await call('/auth/me/avatar', { method: 'PATCH', body: { kind: 'google' } })).status, 401);
+  });
+});

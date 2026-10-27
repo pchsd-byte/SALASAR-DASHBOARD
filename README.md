@@ -172,6 +172,8 @@ Two rules protect the setup:
 
 **Nobody gets in unnamed.** There is no domain rule: any Google account — a personal address or a colleague's work address — is refused until an admin adds it. A refused sign-in lands on a page explaining that access is granted by name, and is recorded as a request the admin can grant or dismiss from **Waiting for access** at the top of the people list.
 
+**Everyone has a profile page.** Clicking your name or picture in the top corner opens **Your profile**: your job title and access level, when you were last here, and **all three sections listed — the ones you have and the ones you do not**, because the section somebody is missing is usually the one they came to ask about. It is also where you set your picture: your Google photo, your initials on one of the dashboard's colours, or one you upload (shrunk in your browser before it is sent, so a photo straight off a phone is fine). Name, email and access come from Google and from your admin, and cannot be changed here.
+
 **Email is a section, not a person.** Several process coordinators can compose and send; what stays with `EMAIL_USER` is the Gmail authorisation — every report leaves from that one mailbox whoever wrote it. Admins are not given Email automatically: the composer and its send queue belong to the people who write the reports. Tick it for an admin who writes them too.
 
 ## Tech stack
@@ -196,7 +198,7 @@ Two rules protect the setup:
 │       ├── index.css       # design tokens
 │       ├── context/AuthContext.jsx
 │       ├── lib/{api.js,sections.js}
-│       ├── pages/{Dashboard,Login,Settings,Email,NoAccess}.jsx
+│       ├── pages/{Dashboard,Login,Settings,Email,Profile,NoAccess}.jsx
 │       └── components/
 │           ├── layout/{Navbar,ProtectedRoute}.jsx
 │           ├── settings/TeamAccessPanel.jsx      # add people, tick sections
@@ -230,7 +232,8 @@ All under `/api`. Everything except the health and auth entry points needs a val
 |---|---|---|---|
 | `GET` | `/health`, `/health/deep` | — | Liveness; the deep one 503s when MongoDB is disconnected |
 | `GET` | `/auth/google`, `/auth/google/callback` | — | Sign in |
-| `GET` | `/auth/me` | auth | Current user: role, title, sections |
+| `GET` | `/auth/me` | auth | Current user: role, title, sections, chosen picture, last sign-in |
+| `PATCH` | `/auth/me/avatar` | auth | Your own picture — the account comes from the session |
 | `POST` | `/auth/logout` | — | Clears the cookie |
 | `GET`/`POST` | `/auth/google/connect-drive…` | admin | Drive grant (offline) |
 | `GET` | `/auth/google/connect-gmail…` | `EMAIL_USER` | Gmail send grant |
@@ -376,6 +379,7 @@ These are **spreadsheet** problems. The app reports them; it never invents corre
 | **8 — Image reports** | Paste-and-arrange screenshot composer with copy/download |
 | **9 — Bandwidth** | Daily sync, conditional downloads, caching, compression, no polling |
 | **10 — People and access** | Sections and roles, managed from Settings instead of environment variables |
+| **11 — Your profile** | A page of your own: what you may open, and a picture you choose |
 
 **The pattern worth noticing:** every stage after deployment has been about the *source data* or the *deployment environment*, not application features. Expect the next problem to be one of those two as well.
 

@@ -31,6 +31,13 @@ export async function fetchMe() {
   return data;
 }
 
+// Your own picture, on your own account — the server takes the id from the session, never from
+// what the browser sends.
+export async function updateMyAvatar(avatar) {
+  const { data } = await api.patch('/auth/me/avatar', avatar);
+  return data;
+}
+
 export async function logout() {
   await api.post('/auth/logout');
 }

@@ -15,6 +15,7 @@ import { AccessRequest } from '../models/AccessRequest.js';
 import { resolveAccess } from '../services/access.service.js';
 import { GoogleToken } from '../models/GoogleToken.js';
 import { encryptText } from '../utils/crypto.js';
+import { BadRequestError } from './dashboard.controller.js';
 
 // Whether the cookie needs the cross-site (SameSite=None; Secure) shape or the simpler
 // same-site (Lax) one. Driven by req.secure (reliable because app.js sets 'trust proxy')
@@ -176,7 +177,56 @@ export async function getCurrentUser(req, res) {
     // used to hard-code one address in the client even though the server reads it from
     // EMAIL_USER — two places to change, and one of them a redeploy of the wrong app.
     emailSender: env.emailUser,
+    // What they chose for themselves (Profile page), and when they were last here.
+    avatar: {
+      kind: user.avatar?.kind ?? 'google',
+      colorIndex: user.avatar?.colorIndex ?? 0,
+      dataUrl: user.avatar?.dataUrl ?? null,
+    },
+    lastLoginAt: user.lastLoginAt ?? null,
+    // Where their access comes from, so the Profile page can say who to ask about changing it
+    // rather than leaving people guessing.
+    accessSource: req.access?.source ?? null,
   });
+}
+
+// An uploaded picture is downscaled to 128x128 by the browser before it is sent, which lands
+// around 10 KB. The cap is well above that and well below anything that would hurt: this value
+// is returned with /auth/me on every page load, and bandwidth on the free tier is metered
+// (§8.6). Anything larger is refused rather than quietly stored.
+const MAX_AVATAR_BYTES = 48 * 1024;
+const DATA_URL = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+
+export async function updateMyAvatar(req, res) {
+  const { kind, colorIndex, dataUrl } = req.body ?? {};
+  if (!['google', 'initials', 'photo'].includes(kind)) {
+    throw new BadRequestError('Choose a Google photo, initials, or upload a picture.');
+  }
+
+  const next = { kind, colorIndex: 0, dataUrl: null };
+
+  if (kind === 'initials') {
+    const index = Number(colorIndex);
+    if (!Number.isInteger(index) || index < 0 || index > 7) throw new BadRequestError('Pick one of the available colours.');
+    next.colorIndex = index;
+  }
+
+  if (kind === 'photo') {
+    if (typeof dataUrl !== 'string' || !DATA_URL.test(dataUrl)) {
+      throw new BadRequestError('That image could not be read. Try a PNG or JPEG.');
+    }
+    // The base64 payload, not the string length, is what is actually stored and sent.
+    const bytes = Math.ceil((dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75);
+    if (bytes > MAX_AVATAR_BYTES) {
+      throw new BadRequestError(`That picture is ${Math.round(bytes / 1024)} KB, over the ${MAX_AVATAR_BYTES / 1024} KB limit. Choose a smaller one.`);
+    }
+    next.dataUrl = dataUrl;
+  }
+
+  // Their own account, always — the id comes from the session, never from the request body.
+  const user = await User.findByIdAndUpdate(req.user.sub, { $set: { avatar: next } }, { new: true }).lean();
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  res.json({ avatar: next });
 }
 
 export function logout(req, res) {
