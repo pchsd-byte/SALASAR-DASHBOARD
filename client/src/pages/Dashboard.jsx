@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
-import { fetchHsdSummary, fetchSyncStatus } from '../lib/api';
+import { fetchHsdSummary, fetchSyncStatus, triggerSync } from '../lib/api';
 import { FilterBar, PRESETS, formatRangeLabel } from '../components/dashboard/FilterBar';
 import { StatCard } from '../components/dashboard/StatCard';
 import { ManpowerTrendChart, ManpowerCategoryChart } from '../components/dashboard/ManpowerChart';
@@ -12,6 +12,7 @@ import { InsightsPanel } from '../components/dashboard/InsightsPanel';
 import { SyncStatusBadge } from '../components/dashboard/SyncStatusBadge';
 import { SynopsisView } from '../components/dashboard/SynopsisView';
 import { StaleDataOverlay } from '../components/dashboard/StaleDataOverlay';
+import { SyncProgressToast } from '../components/dashboard/SyncProgressToast';
 import { ErrorBoundary } from '../components/layout/ErrorBoundary';
 import { useAuth } from '../context/AuthContext';
 
@@ -98,6 +99,43 @@ export function Dashboard() {
     queryClient.invalidateQueries({ queryKey: ['hsd-insights'] });
   }, [queryClient]);
 
+
+  // A sync runs here, not inside the dialog that asked for it: the dialog closes the moment the
+  // button is pressed so the dashboard stays usable, and a run that takes the better part of a
+  // minute needs an owner that is still mounted when it finishes.
+  const [syncRun, setSyncRun] = useState({ state: 'idle', message: '' });
+  const runSyncInBackground = useCallback(async () => {
+    setSyncRun({ state: 'running', message: 'Downloading the workbook and re-reading every tab. You can carry on using the dashboard.' });
+    try {
+      const log = await triggerSync();
+      if (log?.status === 'failed') {
+        // The request succeeded; the reading did not. Saying "updated" here would be a lie.
+        setSyncRun({
+          state: 'error',
+          message: `The workbook could not be read${log.errorCount ? ` (${log.errorCount} error${log.errorCount === 1 ? '' : 's'})` : ''}. Open Settings → Google Drive sync for the details.`,
+        });
+        return;
+      }
+      handleSynced();
+      setSyncRun(
+        log?.status === 'partial'
+          ? { state: 'partial', message: `${log.rowsUpserted ?? 0} rows updated, but some sources reported problems. The sync badge lists them.` }
+          : { state: 'done', message: `${log?.rowsUpserted ?? 0} rows read from the sheet. The figures on screen are now the latest.` },
+      );
+    } catch (err) {
+      const status = err?.response?.status;
+      setSyncRun({
+        state: 'error',
+        message:
+          status === 409
+            ? 'A sync was already running. Give it a minute, then reload the page.'
+            : status === 403
+              ? 'Your session is out of date. Sign out and back in, then try again.'
+              : err?.response?.data?.error || 'The sync could not be started. Please try again.',
+      });
+    }
+  }, [handleSynced]);
+
   // Both plants have production now — Bhilai reads its own three progress tabs. The flag stays
   // because the payload still carries it, and a unit without a source would say so here rather
   // than drawing empty charts.
@@ -120,7 +158,12 @@ export function Dashboard() {
       <StaleDataOverlay
         lastSyncedAt={syncStatusQuery.data?.lastSuccessfulSyncAt}
         isAdmin={user?.role === 'admin'}
-        onSynced={handleSynced}
+        onSyncNow={runSyncInBackground}
+      />
+      <SyncProgressToast
+        state={syncRun.state}
+        message={syncRun.message}
+        onDismiss={() => setSyncRun({ state: 'idle', message: '' })}
       />
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>

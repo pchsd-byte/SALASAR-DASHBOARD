@@ -79,7 +79,7 @@ Then **Copy image** (straight into an email or WhatsApp) or **Download PNG**. No
 Admins add colleagues by work email from **Settings → People and access** — the first tab on the page — give them a job title ("Process Coordinator — Unit 2"), an access level (admin or manager) and tick the sections they may open. Access applies on their next page load — no sign-out needed — and can be revoked without deleting the record.
 
 ### Stale-figure alert
-The dashboard freezes what it loaded for the page session, so when the last sync is more than six hours old a dialog says so on arrival — how old the figures are, when the sheet was last read, and a **Sync now** button for admins that runs the sync and refreshes the page. It appears at most once per tab per sync, closes on Escape, and offers managers the name of who to ask rather than a button they cannot use.
+The dashboard freezes what it loaded for the page session, so when the last sync is more than six hours old a dialog says so on arrival — how old the figures are, when the sheet was last read, and a **Sync now** button for admins that runs the sync and refreshes the page. It appears at most once per tab per sync, closes on Escape, and offers managers the name of who to ask rather than a button they cannot use. Pressing **Sync now** closes the dialog immediately and runs the sync in the background — a pill at the foot of the page reports it while you carry on using the dashboard, then says whether the figures were updated.
 
 ### Sync status
 A badge on every page shows when the data last came from Drive, how many rows were written, and how many issues the run reported. Opening it lists what the sync found, including the spreadsheet's own data problems.
